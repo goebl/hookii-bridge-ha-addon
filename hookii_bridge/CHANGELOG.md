@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.8 (2026-05-29)
+
+**`deviceRegionTask` backward-compat alias in `normalise_status`.** Pre-May-2026 HA template sensors were written against an earlier Hookii cloud schema that nested mowing-task telemetry under `data.STATUS.deviceRegionTask` with slightly different field names (`cutArea` instead of `mowedArea`, `mowingCoverageRate` instead of `mowingCoverage`). The new cloud dropped that nested shape entirely in favour of `data.STATUS.taskInfo` with the renamed fields. Templates reading the old path were resolving to undefined and dashboards were showing "Unknown" / "0" for Cut / Region / Coverage / Height / Progress / Efficiency even after v1.1.7's `taskInfo` fan-out (because users' templates were not reading the fanned-out top-level fields - they were reading `deviceRegionTask.*`).
+
+Bridge now reconstructs the legacy `deviceRegionTask` object from `taskInfo` whenever `taskInfo` is present and `deviceRegionTask` is not, including the two name aliases (`cutArea` ← `mowedArea`, `mowingCoverageRate` ← `mowingCoverage`). Legacy templates resume working without any configuration.yaml edits.
+
+If you wrote your templates against the v1.1.7 fanned-out top-level fields (`value_json.data.STATUS.regionName` etc.), they continue to work too - both paths now resolve to the same values.
+
 ## 1.1.7 (2026-05-29)
 
 **Systematic sensor audit fixes - three classes of bug discovered by walking every HA dashboard sensor against a captured raw STATUS payload from a live mowing mower.**

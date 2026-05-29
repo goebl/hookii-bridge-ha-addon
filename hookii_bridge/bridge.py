@@ -135,6 +135,25 @@ def normalise_status(payload: dict) -> None:
         for k, v in task_info.items():
             status.setdefault(k, v)
 
+        # 1b'. Backward-compat alias: deviceRegionTask. Pre-May-2026 HA
+        #      template sensors were written against an earlier cloud
+        #      schema that nested mowing-task telemetry under
+        #      data.STATUS.deviceRegionTask using slightly different
+        #      field names (cutArea instead of mowedArea,
+        #      mowingCoverageRate instead of mowingCoverage). The new
+        #      cloud dropped that shape entirely. Templates reading the
+        #      old path resolve to undefined and the dashboard shows
+        #      "Unknown" / "0". Reconstruct the legacy shape from
+        #      taskInfo so those templates keep working without manual
+        #      configuration.yaml edits across every install.
+        if "deviceRegionTask" not in status:
+            drt = dict(task_info)
+            if "mowedArea" in drt:
+                drt.setdefault("cutArea", drt["mowedArea"])
+            if "mowingCoverage" in drt:
+                drt.setdefault("mowingCoverageRate", drt["mowingCoverage"])
+            status["deviceRegionTask"] = drt
+
     # 1c. Blade rotation direction (CW vs CCW) is encoded as a sign on
     #     knifeDiscMotorSpeed in the raw cloud payload. HA users want a
     #     "blade is spinning at N rpm" reading, not a vector quantity -
