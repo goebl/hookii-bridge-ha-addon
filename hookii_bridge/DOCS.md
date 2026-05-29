@@ -8,6 +8,19 @@
 >
 > If you're not comfortable running BETA firmware on your mower, this add-on is **not** for you yet - wait until Hookii promotes the new protocol to the stable channel.
 
+> 🚨 **Use a DEDICATED Hookii account for the bridge - DO NOT reuse your primary account.**
+>
+> Hookii's server enforces a strict **one-active-session-per-account** policy: every time the bridge OR your mobile app logs in for the same account, all previous JWTs are silently invalidated server-side. The result is a tug-of-war the user always loses - **you (or your spouse / family) will get logged out of the Hookii mobile app every few minutes** as the bridge re-authenticates, and bridge commands intermittently fail.
+>
+> **The mandatory setup (5 minutes, no code):**
+>
+> 1. Create a **second Hookii account** with a different email - e.g. `homeassistant@yourdomain.com` or `bridge@…`. This is the account the add-on will use.
+> 2. From your **primary** Hookii account in the mobile app, open each mower → Settings → Device Sharing (or "Share Device" / "Add Member" depending on app version) and **share each mower to the new bridge account**.
+> 3. Use the **new bridge account's** email + password in the add-on's `hookii_email` and `hookii_password` config fields (NOT your primary account).
+> 4. Keep using your **primary** account in the Hookii mobile app as normal. No more silent logouts.
+>
+> Your primary account stays the device owner; the bridge account is a shared viewer/controller. Both can issue commands to the mowers because Hookii's sharing model grants full control. If you skip this step the add-on still appears to work - until you open the mobile app, and then you and the bridge will keep evicting each other's sessions forever.
+
 This add-on logs in to Hookii's cloud with your account, keeps the new (May 2026) JWT-gated heartbeat protocol alive, republishes your mower's STATUS to your **own Mosquitto broker** on the legacy `hookii/details/device/<serial>` topic, AND (since v1.1.0) exposes a REST command channel for control operations plus auto-discovered Home Assistant entities so you don't need to write any YAML.
 
 After install you get, per mower, in HA:
@@ -22,11 +35,12 @@ After install you get, per mower, in HA:
 You need to have these set up in Home Assistant already:
 
 1. **Your mower is on Hookii BETA firmware `1.6.8.4-beta` or newer** (see banner above). Verify in the Hookii mobile app under each mower → Settings → Firmware. If you don't see a `…-beta` suffix on the version, you're still on stable and the add-on cannot work.
-2. **Mosquitto broker add-on** (Settings → Add-ons → Add-on Store → "Mosquitto broker" → Install + Start). The community version published by Home Assistant is fine.
-3. **MQTT integration** (Settings → Devices & Services → Add Integration → MQTT). Point it at your Mosquitto broker.
-4. A **dedicated MQTT user** for the bridge. In Home Assistant: Settings → Users → Add user → give it a username like `hookii` and a strong password. You don't need to change anything in the Mosquitto broker add-on - by default it accepts any Home Assistant user's username + password for MQTT login, so the user you just created is immediately usable. (You'll paste that username and password into the Hookii Bridge add-on's `local_mqtt_user` and `local_mqtt_pass` fields below.)
-5. **Your Hookii account credentials** (the email + password you log in to the Hookii mobile app with). Read the "How to enter your password" section below before you paste it.
-6. **Your mower's serial number(s).** You can read these in the Hookii app under each mower → Device info, or off the sticker on the underside of the mower. They look like `HKX1EB100JD25010115`.
+2. **A DEDICATED Hookii account for the bridge** (see the second banner above - this is the most-skipped step and the one that causes the "my mobile app keeps logging out" complaint). Create a second Hookii account with a different email, then from your primary account share every mower to the bridge account via the mobile app's Device Sharing menu. The add-on will use the bridge account's credentials below; your primary account stays signed in on your phone.
+3. **Mosquitto broker add-on** (Settings → Add-ons → Add-on Store → "Mosquitto broker" → Install + Start). The community version published by Home Assistant is fine.
+4. **MQTT integration** (Settings → Devices & Services → Add Integration → MQTT). Point it at your Mosquitto broker.
+5. A **dedicated MQTT user** for the bridge. In Home Assistant: Settings → Users → Add user → give it a username like `hookii` and a strong password. You don't need to change anything in the Mosquitto broker add-on - by default it accepts any Home Assistant user's username + password for MQTT login, so the user you just created is immediately usable. (You'll paste that username and password into the Hookii Bridge add-on's `local_mqtt_user` and `local_mqtt_pass` fields below.)
+6. **The bridge Hookii account's credentials** (the email + password you just created for the dedicated bridge account - NOT your primary phone-app account). Read the "How to enter your password" section below before you paste it.
+7. **Your mower's serial number(s).** You can read these in the Hookii app under each mower → Device info, or off the sticker on the underside of the mower. They look like `HKX1EB100JD25010115`.
 
 ## How to enter your password
 
@@ -61,7 +75,7 @@ The two options produce the same login result; pick whichever you're more comfor
 
    | Field | What to put |
    |---|---|
-   | `hookii_email` | Your Hookii account email. Capital letters in the address are fine - the add-on auto-lowercases before sending to Hookii (their beta server is case-sensitive on user lookup, but you don't have to think about that). |
+   | `hookii_email` | **The bridge account's** Hookii email (the dedicated second account you created for the add-on - NOT your primary phone-app account; see the dedicated-account banner above). Capital letters in the address are fine - the add-on auto-lowercases before sending to Hookii (their beta server is case-sensitive on user lookup, but you don't have to think about that). |
    | `hookii_password` | Either your cleartext password, or its uppercase MD5 hash (see above). |
    | `mower_serials` | Your mower serial number(s). Multiple are comma-separated, e.g. `HKX1EB100JD25010115,HKX2EB100JD24080170`. |
    | `local_mqtt_host` | Leave as `core-mosquitto` if you use the official broker add-on. |
@@ -289,6 +303,7 @@ If you want more (chassis attitude, lift sensors, individual drive motor stats, 
 
 ## Troubleshooting
 
+- **My family / I keep getting logged out of the Hookii mobile app every few minutes.** This is the most-reported issue and it has ONE cause: the add-on is using the same Hookii account as the mobile app. Hookii's server permits exactly one active session per account; whichever client logged in most recently wins and the other is silently kicked. **Fix:** create a separate Hookii account for the bridge and share your mowers to it from your primary account (see the dedicated-account banner at the top of this page). Five minutes of setup, permanent fix.
 - **REST login fails with `code: 5, msg: 该用户未注册` ("user not registered").** Since v1.0.4 the add-on auto-lowercases your email before sending it to Hookii (their beta server is case-sensitive), so this should not happen from a case mismatch alone. If you still see it, double-check the email matches the one you log in to the official Hookii app with, and that the account is registered on the *beta* environment (not just on Hookii's stable cloud).
 - **REST login OK, MQTT connected, but no `RX hk/server/mower/push/...` lines ever appear.** The single most common cause: at least one of your mowers is still on stable firmware. The add-on connects to `iot.beta.hookii.com`, which is only populated by mowers on Hookii BETA firmware `1.6.8.4-beta` or newer. Open the Hookii app, confirm each mower's firmware has the `…-beta` suffix, and let pending updates install before retrying.
 - **No sensors update at all.** Double-check the bridge logs show `cloud-mqtt connected` AND a `RX hk/server/mower/push/...` line within ~30 s. If the second is missing, the heartbeat isn't being accepted — verify your account works in the official Hookii app first.

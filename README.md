@@ -3,6 +3,10 @@
 > ⚠️ **Requires Hookii BETA firmware `1.6.8.4-beta` or newer on every mower this bridge talks to.**
 > The new cloud protocol this add-on speaks (`iot.beta.hookii.com`) is only live on the Hookii BETA channel. **Mowers on the stable firmware channel will not work.** Switch each mower to the Beta channel in the Hookii mobile app before installing.
 
+> 🚨 **Use a DEDICATED Hookii account for the bridge, not your primary account.**
+> Hookii's server only keeps ONE active session per account. If the bridge and your phone app share the same account they will silently evict each other's sessions every few minutes, and you will be permanently logged out of the mobile app.
+> **Fix (5 minutes, no code):** create a second Hookii account, then from your primary account share each mower to it via the mobile app's Device Sharing menu. Configure the add-on with the new bridge account's credentials. See [DOCS.md](hookii_bridge/DOCS.md) for the full walk-through.
+
 This repository contains a single Home Assistant add-on:
 
 - **Hookii Bridge** — a reverse-engineered Home Assistant integration for **Hookii Neomow** robot mowers. Two-way: it reads live telemetry AND sends control commands. Replaces the community workaround that broke when Hookii migrated their cloud in May 2026.
