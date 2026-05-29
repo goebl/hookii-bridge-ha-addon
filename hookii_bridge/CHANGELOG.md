@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Docs: README gains a full "Install path B: Home Assistant Container / Core / k3s" walkthrough so users on Docker-based HA installs (no Supervisor) can install + update the bridge using docker-compose / `docker run` against the repo's root `Dockerfile`. Includes env-var reference table and update commands. The existing Add-on Store path is now explicitly labelled "Install path A: Home Assistant OS / Supervised".
+- Docs: Install path B compose example revised based on field feedback from the first user who set it up — adds the missing `network_mode: host` (required so the bridge can reach the host's Mosquitto on `127.0.0.1:1883` without Docker bridge-network DNS in the way), uses the `- KEY=VALUE` list form for `environment` instead of the `KEY: "value"` map form (more robust against YAML parsers that mis-handle colon-containing values like the `HOOKII_ACCOUNTS` triplet), and pulls the LABEL↔`HOOKII_SERIALS_<LABEL>` dependency out into an explicit warning callout so the link between the two env vars is impossible to miss.
 
 ## 1.1.6 (2026-05-29)
 

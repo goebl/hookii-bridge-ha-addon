@@ -67,7 +67,10 @@ The repo's root [`Dockerfile`](Dockerfile) is built for exactly this case: a pla
 
 ### 1. Add the bridge to your existing `docker-compose.yml`
 
-Drop this service into the same compose file you already use for Home Assistant — easiest place to keep it because the bridge and Home Assistant typically share the same Mosquitto broker on the same Docker network:
+Drop this service into the same compose file you already use for Home Assistant. Home Assistant Container normally runs with `network_mode: host` so it can reach the host's port 1883 directly; the bridge needs the same so it can connect to your local Mosquitto broker without Docker bridge-network DNS getting in the way.
+
+> 🪧 **About the LABEL placeholder below**
+> The string `mower` appears in TWO places: as the first colon-separated field in `HOOKII_ACCOUNTS`, AND as the upper-cased suffix `_MOWER` on the `HOOKII_SERIALS_<LABEL>` variable. If you change one you MUST change the other (and the suffix is ALWAYS upper-cased even if your label is lower-case). If they don't match, the bridge starts up but never receives any STATUS pushes because it has no serial number bound to that account.
 
 ```yaml
 services:
@@ -75,20 +78,33 @@ services:
     build: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
     container_name: hookii-bridge
     restart: unless-stopped
+    network_mode: host                    # ⚠️  Required so the bridge can reach
+                                          #     your host's Mosquitto on 127.0.0.1:1883
     environment:
       # ⚠️  Use a DEDICATED Hookii account, NOT your primary one.
       # See the "dedicated bridge account" warning at the top of this README.
-      HOOKII_ACCOUNTS: "bridge:bridge@yourdomain.com:YOUR_CLEAR_PASSWORD"
-      HOOKII_SERIALS_BRIDGE: "HKX1EB100JD25010115,HKX2EB100JD24080170"  # comma-separated
-      LOCAL_MQTT_HOST: "mosquitto"        # or your broker's IP / hostname
-      LOCAL_MQTT_PORT: "1883"
-      LOCAL_MQTT_USER: "hookii"
-      LOCAL_MQTT_PASS: "<your local broker password>"
-      HEARTBEAT_SEC: "1.5"                # match the mobile app
-      ENABLE_DISCOVERY: "1"               # auto-create HA entities
-      DISCOVERY_PREFIX: "homeassistant"
-      LOG_LEVEL: "INFO"
+      #
+      # Format: <label>:<email>:<password>     ← exactly two colons, no spaces.
+      # The <label> is a free identifier you choose — it links this account
+      # row to its HOOKII_SERIALS_<LABEL> row below.
+      - HOOKII_ACCOUNTS=mower:bridge@yourdomain.com:YOUR_CLEAR_PASSWORD
+
+      # ⚠️  Variable name suffix MUST match the label above, upper-cased.
+      #     Label "mower"  →  variable HOOKII_SERIALS_MOWER
+      #     Label "garden" →  variable HOOKII_SERIALS_GARDEN
+      - HOOKII_SERIALS_MOWER=HKX1EB100JD25010115,HKX2EB100JD24080170  # comma-separated
+
+      - LOCAL_MQTT_HOST=127.0.0.1          # use 127.0.0.1 because network_mode: host
+      - LOCAL_MQTT_PORT=1883
+      - LOCAL_MQTT_USER=hookii
+      - LOCAL_MQTT_PASS=<your local broker password>
+      - HEARTBEAT_SEC=1.5                  # match the mobile app
+      - ENABLE_DISCOVERY=1                 # auto-create HA entities
+      - DISCOVERY_PREFIX=homeassistant
+      - LOG_LEVEL=INFO
 ```
+
+> ℹ️ Note the `- KEY=VALUE` list form (not `KEY: "value"`). Both are valid compose syntax, but the list form is more robust against YAML parsers that mis-handle colon-containing string values like passwords or `HOOKII_ACCOUNTS` triplets.
 
 Bring it up:
 
@@ -102,9 +118,10 @@ If you don't use compose:
 
 ```bash
 docker run -d --name hookii-bridge --restart unless-stopped \
-  -e HOOKII_ACCOUNTS="bridge:bridge@yourdomain.com:YOUR_CLEAR_PASSWORD" \
-  -e HOOKII_SERIALS_BRIDGE="HKX1EB100JD25010115" \
-  -e LOCAL_MQTT_HOST="192.168.1.42" \
+  --network host \
+  -e HOOKII_ACCOUNTS="mower:bridge@yourdomain.com:YOUR_CLEAR_PASSWORD" \
+  -e HOOKII_SERIALS_MOWER="HKX1EB100JD25010115" \
+  -e LOCAL_MQTT_HOST="127.0.0.1" \
   -e LOCAL_MQTT_PORT="1883" \
   -e LOCAL_MQTT_USER="hookii" \
   -e LOCAL_MQTT_PASS="..." \
@@ -112,6 +129,8 @@ docker run -d --name hookii-bridge --restart unless-stopped \
   -e ENABLE_DISCOVERY="1" \
   $(docker build -q https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main)
 ```
+
+Same pairing rule as the compose example: the label in `HOOKII_ACCOUNTS` (here `mower`) determines the `HOOKII_SERIALS_<LABEL>` variable name (here `HOOKII_SERIALS_MOWER`).
 
 ### 3. Verify it's running
 
