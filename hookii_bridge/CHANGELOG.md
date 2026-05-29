@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 (2026-05-29)
+
+**New: REST command channel + MQTT Discovery.** Big release.
+
+- Adds a REST-command wrapper around `iot.beta.hookii.com/api/v1/mower/cmd/...` so the add-on can SEND commands (start, pause, return-to-dock, stop, schedule R/W, params R), not just receive STATUS. Commands are published to `hookii/cmd/<serial>/<action>` on your local Mosquitto broker; the add-on translates each publish into the right REST call with auto re-login on 401.
+- Adds the two-step Start flow (cmd=7 pre-check then cmd=6 execute) with the default policy of "resume from breakpoints if any exist". Safer than the alternative for automations.
+- Adds a derived `ha_state` field in normalised STATUS payloads ("mowing" / "returning" / "docked") computed from `robotStatus` + `workingMode` per the reverse-engineered state machine. Lets the discovered `lawn_mower` entity reflect the mower's activity without per-user template logic.
+- Publishes Home Assistant MQTT-Discovery configs per mower: one `lawn_mower` entity, five command buttons (Start / Pause / Return to dock / Stop keep / Stop clear) and 14 telemetry sensors (battery, blade RPM, voltage, charge current, motor temps, GPS, work status, friendly state). Users no longer need to paste the legacy YAML block. The DOCS-section that documents that block is kept under "Optional: paste-by-hand sensor YAML" for v1.0.x compatibility.
+- Schedule-write safety guard: writes that would set an `enable: true` task whose window covers the current minute-of-day are rejected with an explanatory error published to `hookii/result/<serial>/error`. The Hookii cloud treats such a schedule as an implicit start command and would otherwise make the mower start mowing immediately, even if it was returning to dock.
+- New config options: `hookii_agent` (REST client fingerprint, default Android/Xiaomi), `enable_discovery` (default true), `discovery_prefix` (default homeassistant).
+- Action results: `schedule_read` / `params_read` publish to `hookii/result/<serial>/{schedule,params}` (retained) so automations can subscribe.
+
 ## 1.0.4 (2026-05-29)
 
 - Auto-lowercase `hookii_email` at config parse, mirroring the auto-uppercase MD5 detection in `md5_upper`. The Hookii beta REST API treats email as case-sensitive on user lookup; rather than make users notice + remember that, the bridge now normalises whatever they type. Existing installs with already-lowercased emails are unaffected. Docs still mention the original gotcha so users searching for the chinese error message find context.

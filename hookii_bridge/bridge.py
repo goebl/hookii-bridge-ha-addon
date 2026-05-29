@@ -1,4 +1,4 @@
-"""Hookii Neomow → local MQTT bridge.
+"""Hookii Neomow → local MQTT bridge with HA Discovery + REST commands.
 
 Background: as of May 2026 Hookii migrated their cloud IoT from the
 plain ``hookii/details/device/<serial>`` topic format on their public
@@ -9,57 +9,53 @@ nothing.
 
 This bridge keeps that heartbeat alive per (user-account, mower-serial)
 pair, normalises the cloud's STATUS payload back to the legacy field
-shape, and republishes it to a LOCAL MQTT broker on the OLD topic
-format so any existing Home Assistant template-sensors, automations
-or n8n flows that read ``hookii/details/device/<serial>`` keep working
-without modification.
+shape, republishes it to a LOCAL MQTT broker on the legacy topic
+format, exposes a REST-command channel for control operations (start,
+pause, return, schedule R/W, params read) and publishes Home Assistant
+MQTT Discovery configs so a `lawn_mower` entity and five command
+buttons appear in HA without the user touching YAML.
 
-It is plain Python + paho-mqtt + requests with no host-specific
-dependencies; it runs equally fine as:
+Plain Python + paho-mqtt + requests with no host-specific dependencies;
+runs equally well as:
 
   * a Home Assistant Supervisor add-on (the ``hookii-bridge-ha-addon``
     repo wraps this script with a bashio run.sh that reads
     ``/data/options.json`` and exports the same env-vars listed below);
   * a systemd service on Linux / a Windows Service / Docker Compose
-    workload pointed at any local Mosquitto / EMQX / RabbitMQ
-    broker that speaks MQTT 3.1.1.
+    workload pointed at any local Mosquitto / EMQX / RabbitMQ broker.
 
 Configuration via env:
     HOOKII_ACCOUNTS   "<label>:<email>:<pw>;..." - semicolon-separated
-                      account specs. Label is free-form (used for log
-                      lines + per-account dedup). Most users have one
-                      account; supply just one spec without semicolons.
-                      Password may be cleartext OR a 32-char uppercase
-                      MD5 hash (auto-detected).
+                      account specs. Most users have one. Password can
+                      be cleartext OR a 32-char MD5-uppercase hash
+                      (auto-detected).
     HOOKII_REST_HOST  default iot.beta.hookii.com:10443
     HOOKII_MQTT_HOST  default iot.beta.hookii.com:8883
-    HOOKII_MQTT_USER  default hookii-iot (shared static, same as the
-                      official Hookii mobile app uses)
+    HOOKII_MQTT_USER  default hookii-iot (shared with the mobile app)
     HOOKII_MQTT_PASS  default ukLWdAbvRF3JVqNyTdAVJsMx (ditto)
-    HOOKII_MODEL      default 0002 (Pro). The bridge auto-learns the
-                      actual model code per serial from the first
-                      observed STATUS push, so this rarely needs
-                      overriding.
+    HOOKII_MODEL      default 0002 (Pro). Bridge auto-learns the actual
+                      model per serial from the first observed STATUS.
+    HOOKII_AGENT      client fingerprint sent on every REST request.
+                      Default is a plausible Android/Xiaomi string;
+                      override if you want a different fingerprint.
 
     LOCAL_MQTT_HOST   default 127.0.0.1
     LOCAL_MQTT_PORT   default 1883
-    LOCAL_MQTT_USER   required - an MQTT user on your local broker that
-                      can publish to LOCAL_TOPIC_FMT
-    LOCAL_MQTT_PASS   required - that user's password
-    LOCAL_TOPIC_FMT   default "hookii/details/device/{serial}" -
-                      the placeholder {serial} is interpolated per
-                      mower; preserves the legacy HA-wiring topic.
+    LOCAL_MQTT_USER   required
+    LOCAL_MQTT_PASS   required
+    LOCAL_TOPIC_FMT   default "hookii/details/device/{serial}"
+    CMD_TOPIC_FMT     default "hookii/cmd/{serial}/{action}"
+
+    ENABLE_DISCOVERY  "1" (default) publishes HA MQTT-Discovery configs.
+    DISCOVERY_PREFIX  default "homeassistant" (matches HA default).
 
     HEARTBEAT_SEC     default 15
-    LOG_LEVEL         default INFO. Set to DEBUG only when
-                      troubleshooting - it logs every inbound topic.
+    LOG_LEVEL         default INFO
 
     HOOKII_SERIALS_<LABEL>
                       Optional override of the device-list returned by
                       REST login. Example for label "addon":
                         HOOKII_SERIALS_ADDON=HKX1...,HKX2...
-                      Useful because Hookii's login response doesn't
-                      always enumerate devices reliably.
 """
 from __future__ import annotations
 
@@ -188,6 +184,36 @@ def normalise_status(payload: dict) -> None:
     if "fourGSignal" in status and "networkSignal" not in status:
         status["networkSignal"] = status["fourGSignal"]
 
+    # 6. HA-friendly derived state from robotStatus + workingMode (per the
+    #    reverse-engineered command/state reference). This lets the
+    #    discovered lawn_mower entity use a stable activity field and saves
+    #    every user from writing the same template logic by hand.
+    rs = status.get("robotStatus")
+    wm = status.get("workingMode")
+    if rs == 5:
+        status["ha_state"] = "docked"
+        status["ha_is_charging"] = True
+    elif rs in (0, 3):
+        status["ha_state"] = "docked"
+        status["ha_is_charging"] = False
+    elif rs in (9, 10):
+        status["ha_state"] = "returning"
+        status["ha_is_charging"] = False
+    elif rs == 7:
+        # robotStatus=7 is the "travelling" sub-state. workingMode=1 means
+        # the higher-level intent is "go home"; workingMode=2 means "work"
+        # so we're transiting between zones mid-job.
+        status["ha_state"] = "returning" if wm == 1 else "mowing"
+        status["ha_is_charging"] = False
+    elif rs in (1, 2):
+        status["ha_state"] = "mowing"
+        status["ha_is_charging"] = False
+    else:
+        # Unknown robotStatus value (firmware update, edge state) - leave
+        # the previous value alone by NOT setting ha_state; consumers'
+        # templates already handle the "previous-state" fallback.
+        pass
+
 
 def md5_upper(s: str) -> str:
     """Hookii password hash: MD5(cleartext) upper-cased hex.
@@ -230,6 +256,9 @@ class Config:
     local_pass: str
     local_topic_fmt: str
     heartbeat_sec: int
+    enable_discovery: bool = True
+    discovery_prefix: str = "homeassistant"
+    cmd_topic_fmt: str = "hookii/cmd/{serial}/{action}"
 
 
 def parse_config() -> Config:
@@ -273,6 +302,9 @@ def parse_config() -> Config:
         local_pass=os.environ.get("LOCAL_MQTT_PASS", ""),
         local_topic_fmt=os.environ.get("LOCAL_TOPIC_FMT", "hookii/details/device/{serial}"),
         heartbeat_sec=int(os.environ.get("HEARTBEAT_SEC", "15")),
+        enable_discovery=os.environ.get("ENABLE_DISCOVERY", "1") not in ("0", "false", "False", ""),
+        discovery_prefix=os.environ.get("DISCOVERY_PREFIX", "homeassistant"),
+        cmd_topic_fmt=os.environ.get("CMD_TOPIC_FMT", "hookii/cmd/{serial}/{action}"),
     )
 
 
@@ -313,6 +345,256 @@ def hookii_login(cfg: Config, acct: HookiiAccount) -> None:
     else:
         LOG.info("[%s] login OK, jwt-len=%d, no device-list in payload - fetch separately or hardcode via HOOKII_SERIALS_%s",
                  acct.label, len(acct.jwt), acct.label.upper())
+
+
+# ---------------------------------------------------------------------------
+# REST command helpers (the command channel is HTTP, not MQTT)
+# ---------------------------------------------------------------------------
+#
+# Per the reverse-engineered protocol reference: all control operations go to
+# `iot.beta.hookii.com:10443` over HTTPS. The cloud MQTT bus is read-only for
+# telemetry. Commands need the JWT from /user/login/email in the hookii-token
+# header; on 401 we re-login once and retry. The response envelope is
+# {"code": 1, "msg": "...", "data": {...}}; code 1 = success.
+
+
+def _hookii_post(cfg: Config, acct: HookiiAccount, path: str, body: dict) -> dict:
+    """POST a Hookii command. Auto re-login on 401. Returns response.data dict."""
+    url = f"https://{cfg.rest_host}:{cfg.rest_port}{path}"
+    for attempt in (1, 2):
+        try:
+            r = requests.post(url, json=body, headers=hookii_headers(token=acct.jwt or ""), timeout=20)
+        except requests.RequestException:
+            LOG.exception("[%s] POST %s transport error (attempt %d)", acct.label, path, attempt)
+            return {}
+        if r.status_code == 401 and attempt == 1:
+            LOG.info("[%s] POST %s -> 401, re-login + retry", acct.label, path)
+            try:
+                hookii_login(cfg, acct)
+            except Exception:
+                LOG.exception("[%s] re-login failed during command retry", acct.label)
+                return {}
+            continue
+        try:
+            data = r.json()
+        except Exception:
+            LOG.error("[%s] POST %s -> %s (non-JSON %d-byte body)", acct.label, path, r.status_code, len(r.content))
+            return {}
+        code = data.get("code") if isinstance(data, dict) else None
+        if code not in (0, 1):
+            LOG.warning("[%s] POST %s -> code=%s msg=%s",
+                        acct.label, path, code, data.get("msg") if isinstance(data, dict) else "?")
+        return data.get("data") if isinstance(data, dict) else {} or {}
+    return {}
+
+
+def cmd_start_stop(cfg: Config, acct: HookiiAccount, serial: str, model: str,
+                   command: int, region_list: list | None = None,
+                   req_opr_type: int = 0) -> dict:
+    body: dict = {
+        "command": command,
+        "serialNumber": serial,
+        "modelCode": model,
+        "reqOprType": req_opr_type,
+    }
+    if region_list is not None:
+        body["regionList"] = region_list
+    return _hookii_post(cfg, acct, "/api/v1/mower/cmd/start/stop/job", body)
+
+
+def cmd_start_with_precheck(cfg: Config, acct: HookiiAccount, serial: str, model: str,
+                            region_list: list | None = None) -> dict:
+    """Two-step start: cmd=7 pre-check then cmd=6 execute (per protocol reference).
+
+    Default policy when the pre-check returns interrupted mowing areas is to
+    RESUME from breakpoints ("Keep mowing"). That's the safer behaviour for
+    automation: nothing the mower had already cut gets discarded silently.
+    Users who want a fresh start can send the action `stop_clear` first.
+    """
+    rl = region_list or []
+    LOG.info("[%s] start %s: pre-check (cmd=7) regionList=%s", acct.label, serial, rl)
+    pre = cmd_start_stop(cfg, acct, serial, model, 7, region_list=rl)
+    interrupted = (pre or {}).get("interruptedMowingAreaList") or []
+    if interrupted:
+        LOG.info("[%s] start %s: %d interrupted area(s) - resuming from breakpoints",
+                 acct.label, serial, len(interrupted))
+    LOG.info("[%s] start %s: execute (cmd=6)", acct.label, serial)
+    return cmd_start_stop(cfg, acct, serial, model, 6, region_list=rl)
+
+
+def _local_minutes_now() -> int:
+    n = datetime.now()
+    return n.hour * 60 + n.minute
+
+
+def cmd_schedule_read(cfg: Config, acct: HookiiAccount, serial: str, model: str) -> dict:
+    body = {
+        "command": 0, "response": None,
+        "serialNumber": serial, "modelCode": model,
+        "timeZoneOffset": None, "taskList": None, "shieldTaskList": None,
+    }
+    return _hookii_post(cfg, acct, "/api/v1/mower/cmd/calendar/time", body)
+
+
+def cmd_schedule_write(cfg: Config, acct: HookiiAccount, serial: str, model: str,
+                      task_list: list, time_zone_offset: int | None = None) -> dict:
+    """Write the schedule. Refuses if any enabled task overlaps the current
+    local time, because the Hookii cloud treats "active schedule starting now"
+    as an implicit start command - even if the mower was in the middle of
+    returning to dock. The reference doc calls this out explicitly."""
+    now_m = _local_minutes_now()
+    for t in (task_list or []):
+        if not t.get("enable"):
+            continue
+        st = t.get("startTime")
+        et = t.get("endTime")
+        if st is None or et is None:
+            continue
+        if st <= now_m <= et:
+            raise ValueError(
+                f"refusing schedule write: enabled task {t.get('taskId')} window "
+                f"[{st},{et}] overlaps current minute-of-day {now_m}; mower would "
+                f"start mowing immediately. Disable the task or wait until after "
+                f"the window."
+            )
+    body = {
+        "command": 1, "response": None,
+        "serialNumber": serial, "modelCode": model,
+        "timeZoneOffset": time_zone_offset,
+        "taskList": task_list, "shieldTaskList": [],
+    }
+    return _hookii_post(cfg, acct, "/api/v1/mower/cmd/calendar/time", body)
+
+
+def cmd_params_read(cfg: Config, acct: HookiiAccount, serial: str, model: str) -> dict:
+    body = {
+        "command": 0, "response": None,
+        "serialNumber": serial, "modelCode": model,
+        "areaParamList": None, "globalParam": None, "globalModeParamList": None,
+    }
+    return _hookii_post(cfg, acct, "/api/v1/mower/cmd/calendar/param", body)
+
+
+# ---------------------------------------------------------------------------
+# Home Assistant MQTT Discovery
+# ---------------------------------------------------------------------------
+
+
+def _device_descriptor(serial: str) -> dict:
+    return {
+        "identifiers": [f"hookii_{serial}"],
+        "name": f"Neomow {serial[-6:]}",
+        "manufacturer": "Hookii",
+        "model": "Neomow",
+        "via_device": "hookii_bridge",
+    }
+
+
+def _value_tmpl(jinja_inner: str, fallback_jinja: str = "this.state") -> str:
+    """Wrap a Shape-A field extractor in the standard "previous-state if not STATUS" guard."""
+    return (
+        "{% if value_json is mapping and value_json.msgType == 'STATUS' "
+        f"and {jinja_inner.replace(' is defined', '')} is defined %}}"
+        f"{{{{ {jinja_inner} }}}}"
+        "{% else %}"
+        f"{{{{ {fallback_jinja} }}}}"
+        "{% endif %}"
+    )
+
+
+def publish_discovery(local: mqtt.Client, cfg: Config, serial: str) -> None:
+    """Publish HA MQTT-discovery configs for one mower.
+
+    Emits a `lawn_mower` entity, five command `button`s (start, pause,
+    return, stop_keep, stop_clear) and the common telemetry `sensor`s.
+    Users who already pasted the YAML from DOCS get duplicate entities
+    with distinct unique_ids - no conflict - and can delete their YAML
+    blocks once they've verified the discovered ones work.
+    """
+    if not cfg.enable_discovery:
+        return
+    prefix = cfg.discovery_prefix
+    state_topic = cfg.local_topic_fmt.format(serial=serial)
+    device = _device_descriptor(serial)
+
+    def _publish(component: str, object_id: str, body: dict) -> None:
+        topic = f"{prefix}/{component}/hookii_{serial}/{object_id}/config"
+        local.publish(topic, json.dumps(body), qos=1, retain=True)
+
+    # 1. Five buttons (each posts an empty JSON object as the "press" payload;
+    #    the bridge dispatcher reads serial + action from the topic).
+    for action, name, icon in [
+        ("start",      "Start",                  "mdi:play"),
+        ("pause",      "Pause",                  "mdi:pause"),
+        ("return",     "Return to dock",         "mdi:home-import-outline"),
+        ("stop_keep",  "Stop (keep progress)",   "mdi:stop"),
+        ("stop_clear", "Stop (clear progress)",  "mdi:stop-circle-outline"),
+    ]:
+        _publish("button", action, {
+            "name": name,
+            "unique_id": f"hookii_{serial}_{action}",
+            "command_topic": cfg.cmd_topic_fmt.format(serial=serial, action=action),
+            "payload_press": "{}",
+            "icon": icon,
+            "device": device,
+        })
+
+    # 2. Standard lawn_mower entity. The activity_value_template extracts our
+    #    derived ha_state field from STATUS payloads; non-STATUS msgTypes
+    #    leave the previous activity alone.
+    _publish("lawn_mower", "mower", {
+        "name": "Mower",
+        "unique_id": f"hookii_{serial}_lawn_mower",
+        "activity_state_topic": state_topic,
+        "activity_value_template": _value_tmpl(
+            "value_json.data.STATUS.ha_state",
+            "this.attributes.activity or 'docked'",
+        ),
+        "start_mowing_command_topic": cfg.cmd_topic_fmt.format(serial=serial, action="start"),
+        "pause_command_topic": cfg.cmd_topic_fmt.format(serial=serial, action="pause"),
+        "dock_command_topic": cfg.cmd_topic_fmt.format(serial=serial, action="return"),
+        "device": device,
+    })
+
+    # 3. Sensors - the canonical out-of-box telemetry set. Users with custom
+    #    YAML still see THEIR sensors; these are an additional discovered
+    #    namespace.
+    sensors = [
+        # (object_id, friendly_name, field, unit, device_class, state_class, icon, value_type)
+        ("battery",      "Battery",            "electricity",           "%",   "battery",     "measurement", None,                "int"),
+        ("blade_rpm",    "Blade RPM",          "knifeDiscMotorSpeed",   "rpm", None,          "measurement", "mdi:saw-blade",     "int"),
+        ("voltage",      "Voltage",            "voltage",               "V",   "voltage",     "measurement", None,                "float"),
+        ("charge_a",     "Charge current",     "chargeCurrent",         "A",   "current",     "measurement", None,                "float"),
+        ("temp_battery", "Battery temp",       "batteryTemp",           "°C",  "temperature", "measurement", None,                "float"),
+        ("temp_blade",   "Blade motor temp",   "knifeDiscMotorTemp",    "°C",  "temperature", "measurement", None,                "float"),
+        ("temp_left",    "Left drive temp",    "leftDriveMotorTemp",    "°C",  "temperature", "measurement", None,                "float"),
+        ("temp_right",   "Right drive temp",   "rightDriveMotorTemp",   "°C",  "temperature", "measurement", None,                "float"),
+        ("wifi_signal",  "WiFi signal",        "wifiSignal",            "dBm", "signal_strength", "measurement", None,            "int"),
+        ("satellite",    "GPS satellites",     "satellite",             None,  None,          "measurement", "mdi:satellite-variant", "int"),
+        ("latitude",     "Latitude",           "latitude",              "°",   None,          None,          "mdi:latitude",      "float"),
+        ("longitude",    "Longitude",          "longitude",             "°",   None,          None,          "mdi:longitude",     "float"),
+        ("work_status",  "Work status",        "workStatus",            None,  None,          None,          "mdi:robot-mower",   "int"),
+        ("ha_state",     "State",              "ha_state",              None,  None,          None,          "mdi:robot-mower-outline", "str"),
+    ]
+    for obj, name, field_, unit, dc, sc, icon, vt in sensors:
+        body = {
+            "name": name,
+            "unique_id": f"hookii_{serial}_{obj}",
+            "state_topic": state_topic,
+            "value_template": _value_tmpl(f"value_json.data.STATUS.{field_}"),
+            "device": device,
+        }
+        if unit:
+            body["unit_of_measurement"] = unit
+        if dc:
+            body["device_class"] = dc
+        if sc:
+            body["state_class"] = sc
+        if icon:
+            body["icon"] = icon
+        _publish("sensor", obj, body)
+
+    LOG.info("discovery: published %d entities for %s", 5 + 1 + len(sensors), serial)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +720,66 @@ class AccountClient:
         except Exception:
             LOG.exception("[%s] error processing inbound msg", self.acct.label)
 
+    # ---- Local command execution --------------------------------------
+
+    def execute_local_command(self, action: str, serial: str, payload: dict) -> None:
+        """Translate a hookii/cmd/<serial>/<action> publish into a REST call.
+
+        Each branch maps to one of the command codes documented in the
+        protocol reference. Schedule writes go through cmd_schedule_write
+        which enforces the "no overlap with current minute-of-day" guard
+        so an automation cannot accidentally make the mower start mowing
+        by writing an active schedule for "now".
+        """
+        model = self._serial_model.get(serial, self.cfg.model)
+        LOG.info("[%s] cmd %s serial=%s payload-keys=%s",
+                 self.acct.label, action, serial, list(payload.keys()))
+        try:
+            if action == "start":
+                cmd_start_with_precheck(self.cfg, self.acct, serial, model,
+                                        payload.get("regionList"))
+            elif action == "pause":
+                cmd_start_stop(self.cfg, self.acct, serial, model, 3)
+            elif action in ("return", "dock", "recharge"):
+                cmd_start_stop(self.cfg, self.acct, serial, model, 1)
+            elif action == "stop_keep":
+                cmd_start_stop(self.cfg, self.acct, serial, model, 2)
+            elif action == "stop_clear":
+                cmd_start_stop(self.cfg, self.acct, serial, model, 8)
+            elif action == "schedule_read":
+                data = cmd_schedule_read(self.cfg, self.acct, serial, model)
+                # Echo back to a local "result" topic so automations can
+                # subscribe and see the current schedule.
+                self.local.publish(
+                    f"hookii/result/{serial}/schedule",
+                    json.dumps(data), qos=1, retain=True,
+                )
+            elif action == "schedule_write":
+                cmd_schedule_write(
+                    self.cfg, self.acct, serial, model,
+                    payload.get("taskList") or [],
+                    payload.get("timeZoneOffset"),
+                )
+            elif action == "params_read":
+                data = cmd_params_read(self.cfg, self.acct, serial, model)
+                self.local.publish(
+                    f"hookii/result/{serial}/params",
+                    json.dumps(data), qos=1, retain=True,
+                )
+            else:
+                LOG.warning("[%s] unknown cmd action %r (serial %s)", self.acct.label, action, serial)
+        except ValueError as e:
+            # Guardrail rejection (e.g. schedule overlap). Surface via a
+            # local error topic so users can wire it into an HA persistent
+            # notification.
+            LOG.warning("[%s] cmd %s rejected: %s", self.acct.label, action, e)
+            self.local.publish(
+                f"hookii/result/{serial}/error",
+                json.dumps({"action": action, "error": str(e)}), qos=1, retain=False,
+            )
+        except Exception:
+            LOG.exception("[%s] cmd %s failed", self.acct.label, action)
+
     # ---- Heartbeat -----------------------------------------------------
 
     def _heartbeat_loop(self) -> None:
@@ -505,6 +847,10 @@ def main() -> int:
 
     # REST login + cloud MQTT per account.
     clients: list[AccountClient] = []
+    # serial -> AccountClient lookup used by the local command dispatcher
+    # (one local MQTT client receives all command publishes; the serial
+    # in the topic tells us which account-bound REST session owns it).
+    account_by_serial: dict[str, AccountClient] = {}
     for acct in cfg.accounts:
         # Allow hardcoded serial fallback via env (HOOKII_SERIALS_<LABEL>).
         env_serials = os.environ.get(f"HOOKII_SERIALS_{acct.label.upper()}", "").strip()
@@ -523,10 +869,41 @@ def main() -> int:
         ac = AccountClient(cfg, acct, local)
         ac.start()
         clients.append(ac)
+        for sn in acct.serials:
+            account_by_serial[sn] = ac
+            publish_discovery(local, cfg, sn)
 
     if not clients:
         LOG.fatal("no accounts started successfully")
         return 1
+
+    # Wire the local command dispatcher. Every button-press, lawn_mower
+    # service-call and direct mqtt.publish on hookii/cmd/<serial>/<action>
+    # arrives here and gets translated to a REST call.
+    def _on_local_cmd(_c, _u, m: mqtt.MQTTMessage) -> None:
+        try:
+            # Expected: hookii/cmd/<serial>/<action>
+            parts = m.topic.split("/")
+            if len(parts) != 4 or parts[0] != "hookii" or parts[1] != "cmd":
+                return
+            serial, action = parts[2], parts[3]
+            ac = account_by_serial.get(serial)
+            if not ac:
+                LOG.warning("local cmd %s: unknown serial %s (known: %s)",
+                            action, serial, list(account_by_serial.keys()))
+                return
+            try:
+                payload = json.loads(m.payload) if m.payload else {}
+            except Exception:
+                payload = {}
+            ac.execute_local_command(action, serial, payload)
+        except Exception:
+            LOG.exception("error dispatching local command on %s", m.topic)
+
+    local.on_message = _on_local_cmd
+    local.subscribe("hookii/cmd/+/+", qos=1)
+    LOG.info("local cmd subscriber active on hookii/cmd/+/+ for %d serial(s)",
+             len(account_by_serial))
 
     LOG.info("bridge running with %d cloud client(s); ctrl-c to exit", len(clients))
 

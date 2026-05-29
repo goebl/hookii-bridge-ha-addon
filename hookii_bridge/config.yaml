@@ -1,12 +1,13 @@
 name: Hookii Bridge
-version: "1.0.4"
+version: "1.1.0"
 slug: hookii_bridge
 description: >-
   REQUIRES Hookii BETA firmware 1.6.8.4-beta or newer. Reverse-engineered
   cloud bridge for Hookii Neomow robot mowers (May 2026 BETA protocol).
-  Logs in to Hookii's REST API, keeps a JWT-gated MQTT heartbeat alive,
-  normalises the payload and republishes to your local MQTT broker on the
-  legacy topic format so existing HA sensors keep working.
+  Logs in, keeps the JWT heartbeat alive, normalises the payload, REST
+  command channel for start/pause/return/stop, publishes Home Assistant
+  MQTT Discovery configs so a lawn_mower entity + 5 buttons + telemetry
+  sensors appear in HA without any YAML.
 url: https://github.com/conscientsystems/hookii-bridge-ha-addon
 arch:
   - amd64
@@ -28,6 +29,9 @@ options:
   local_mqtt_pass: ""
   heartbeat_seconds: 15
   log_level: "INFO"
+  hookii_agent: "Android/Xiaomi 25010PN30G 16/V1.1.0/189"
+  enable_discovery: true
+  discovery_prefix: "homeassistant"
 schema:
   hookii_email: str
   hookii_password: password
@@ -38,3 +42,6 @@ schema:
   local_mqtt_pass: password
   heartbeat_seconds: int(5,120)
   log_level: list(DEBUG|INFO|WARNING|ERROR)
+  hookii_agent: str
+  enable_discovery: bool
+  discovery_prefix: str

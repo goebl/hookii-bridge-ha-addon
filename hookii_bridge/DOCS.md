@@ -8,7 +8,14 @@
 >
 > If you're not comfortable running BETA firmware on your mower, this add-on is **not** for you yet - wait until Hookii promotes the new protocol to the stable channel.
 
-This add-on logs in to Hookii's cloud with your account, keeps the new (May 2026) JWT-gated heartbeat protocol alive, and republishes your mower's STATUS to your **own Mosquitto broker** on the legacy `hookii/details/device/<serial>` topic that the original community integrations used. Any existing Home Assistant template sensors, automations or dashboards that read from that topic keep working unchanged.
+This add-on logs in to Hookii's cloud with your account, keeps the new (May 2026) JWT-gated heartbeat protocol alive, republishes your mower's STATUS to your **own Mosquitto broker** on the legacy `hookii/details/device/<serial>` topic, AND (since v1.1.0) exposes a REST command channel for control operations plus auto-discovered Home Assistant entities so you don't need to write any YAML.
+
+After install you get, per mower, in HA:
+
+- One `lawn_mower.<your_mower>` entity with `start_mowing`, `pause` and `dock` services wired up.
+- Five buttons: **Start**, **Pause**, **Return to dock**, **Stop (keep progress)**, **Stop (clear progress)**.
+- Telemetry sensors: battery, blade RPM, voltage, charge current, four temperatures (battery / blade / left & right drive), WiFi signal, GPS satellites, latitude, longitude, work status and a friendly "State" sensor that reads "mowing" / "returning" / "docked".
+- Raw `hookii/details/device/<serial>` topic still publishes the full STATUS payload, so any existing template sensors or n8n flows keep working unchanged.
 
 ## What you need before installing
 
@@ -63,6 +70,9 @@ The two options produce the same login result; pick whichever you're more comfor
    | `local_mqtt_pass` | That user's password. |
    | `heartbeat_seconds` | `15` (default; only change if you know why). |
    | `log_level` | `INFO` (use `DEBUG` only when troubleshooting). |
+   | `hookii_agent` | Client fingerprint string sent on every REST request to Hookii. The default is a plausible Android/Xiaomi value. Override only if you want the add-on to identify as a different device — most users should leave this. |
+   | `enable_discovery` | `true` (default) to auto-create the `lawn_mower` entity, 5 buttons and telemetry sensors via MQTT Discovery. Set `false` if you want to manage everything via your own YAML. |
+   | `discovery_prefix` | `homeassistant` (default; matches the HA convention). Change only if you've reconfigured Home Assistant's MQTT integration to use a different prefix. |
 
 4. Save → switch to the **Info** tab → click **Start**.
 5. Open the **Log** tab and confirm you see lines like:
@@ -76,7 +86,47 @@ The two options produce the same login result; pick whichever you're more comfor
 
    If you see `REST login failed` with `code: 5, msg: 该用户未注册`, your email is not registered on `iot.beta.hookii.com`. Try the credentials in the Hookii mobile app first. If you see `code: 2, msg: hookii-agent参数错误`, that's a Hookii server change and we'll need to update the add-on.
 
-## Wire up Home Assistant sensors
+## Sending commands
+
+The add-on subscribes to `hookii/cmd/<serial>/<action>` and translates each publish into a REST call against `iot.beta.hookii.com`. The five buttons published via Discovery already wire up the common actions; if you'd rather call them from automations or scripts, the topics are:
+
+| Topic | Payload | What it does |
+|---|---|---|
+| `hookii/cmd/<serial>/start` | `{}` or `{"regionList":[0,1]}` | Two-step start (pre-check + execute). Default policy is "resume from breakpoints" if any exist. Pass `regionList` to mow only specific areas. |
+| `hookii/cmd/<serial>/pause` | `{}` | Pause the current task. |
+| `hookii/cmd/<serial>/return` | `{}` | Return to dock and recharge. Also aliased as `dock` and `recharge`. |
+| `hookii/cmd/<serial>/stop_keep` | `{}` | Cancel the current task but keep breakpoint progress so a subsequent Start resumes where it left off. |
+| `hookii/cmd/<serial>/stop_clear` | `{}` | Cancel and discard all progress. Use this if you want the next Start to be a fresh full-coverage pass. |
+| `hookii/cmd/<serial>/schedule_read` | `{}` | Read the current schedule; result is published to `hookii/result/<serial>/schedule` (retained). |
+| `hookii/cmd/<serial>/schedule_write` | `{"taskList":[ ... ],"timeZoneOffset":null}` | Replace the schedule. See "Schedule write" section below for the task shape **and a critical safety note**. |
+| `hookii/cmd/<serial>/params_read` | `{}` | Read the per-area mowing parameters (height, speed, mode, etc); result on `hookii/result/<serial>/params`. |
+
+Errors (e.g. a schedule-write safety guard rejection) are published to `hookii/result/<serial>/error` as `{"action": "...", "error": "..."}`. Wire this into a persistent-notification automation if you want to surface failures.
+
+### Schedule write — important safety note
+
+The Hookii cloud treats an enabled schedule whose start/end window contains the current local time as an **implicit start command**. Writing such a schedule causes the mower to immediately start mowing, even if it was returning to dock or charging. The add-on rejects writes that would trigger this and emits an `error` payload — but you should still avoid writing schedules close to the current time from automations.
+
+Task shape:
+
+```json
+{
+  "taskId": 1,
+  "enable": true,
+  "startTime": 180,
+  "endTime": 1440,
+  "weekList": [0, 1, 2, 3, 4, 5, 6],
+  "areaIndexList": [0, 1, 2]
+}
+```
+
+- `startTime` / `endTime` are minutes since midnight (`180 = 03:00`, `1440 = 24:00`).
+- `weekList` is 0-indexed; full coverage = `[0,1,2,3,4,5,6]`. The exact weekday-vs-Sunday convention isn't fully pinned down in the protocol reference; if you see off-by-one behaviour, try shifting.
+- `areaIndexList` selects which mowing zones the schedule applies to (0-indexed as defined in the Hookii app).
+
+## Optional: paste-by-hand sensor YAML (legacy compatibility)
+
+> Since v1.1.0 you do **not** need to do this. The Discovery feature above already creates the sensors. This block is kept for users on v1.0.x or anyone who has set `enable_discovery: false`.
 
 The bridge publishes raw mower STATUS to `hookii/details/device/<your-serial>`. Add this YAML to your `configuration.yaml` (or under `mqtt:` if you already have a section), replacing **every occurrence of `HKX1EB100JD25010115` with YOUR serial**. If you have more than one mower, duplicate the whole block once per mower and rename `neomow1_*` → `neomow2_*` etc.
 
