@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.5 (2026-05-29)
+
+**Detect `code=10` "token 失效" + re-login retry.** Resolves the "I press Dock or Start and nothing happens" symptom that 1.1.3's polling alone didn't fully fix.
+
+Hookii's server returns HTTP 200 with `{"code":10,"msg":"token 失效"}` (= "invalid token") in the JSON body when a JWT has been demoted server-side - which appears to happen aggressively when another client logs in for the same user, or when the bridge's heartbeat session gets remapped. The bridge was treating this as a normal error response and giving up; commands silently failed.
+
+`_hookii_post` now treats `code:10` the same way as HTTP 401: re-login through `/api/v1/user/login/email`, refresh the JWT in-place, and retry the original POST once. Verified live: a return command that previously logged `code=10 msg=token 失效` now logs `re-login + retry` then `cmd 1 finalised after 10 poll(s)`.
+
 ## 1.1.4 (2026-05-29)
 
 **Heartbeat `push` field is now a per-session constant (was a monotonic counter).** Likely root cause of the "mobile app logs me out every ~hour" symptom that 1.1.2 alone didn't fully resolve.

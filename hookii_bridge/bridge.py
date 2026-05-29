@@ -344,7 +344,13 @@ def hookii_login(cfg: Config, acct: HookiiAccount) -> None:
 
 
 def _hookii_post(cfg: Config, acct: HookiiAccount, path: str, body: dict) -> dict:
-    """POST a Hookii command. Auto re-login on 401. Returns response.data dict."""
+    """POST a Hookii command. Auto re-login on 401 OR application-level
+    code=10 ("token 失效" = invalid token). Returns response.data dict.
+
+    Hookii's server returns 200 OK with code=10 in the JSON body when the
+    JWT has been invalidated server-side (often because the user signed
+    in again from another device, or the server eagerly expired our
+    token). That requires re-login + retry exactly like a 401."""
     url = f"https://{cfg.rest_host}:{cfg.rest_port}{path}"
     for attempt in (1, 2):
         try:
@@ -366,6 +372,15 @@ def _hookii_post(cfg: Config, acct: HookiiAccount, path: str, body: dict) -> dic
             LOG.error("[%s] POST %s -> %s (non-JSON %d-byte body)", acct.label, path, r.status_code, len(r.content))
             return {}
         code = data.get("code") if isinstance(data, dict) else None
+        if code == 10 and attempt == 1:
+            LOG.info("[%s] POST %s -> code=10 token-invalid, re-login + retry",
+                     acct.label, path)
+            try:
+                hookii_login(cfg, acct)
+            except Exception:
+                LOG.exception("[%s] re-login failed during code=10 retry", acct.label)
+                return {}
+            continue
         if code not in (0, 1):
             LOG.warning("[%s] POST %s -> code=%s msg=%s",
                         acct.label, path, code, data.get("msg") if isinstance(data, dict) else "?")
