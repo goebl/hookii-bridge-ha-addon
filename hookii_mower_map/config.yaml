@@ -1,0 +1,46 @@
+name: Hookii Mower Map
+version: "1.0.0"
+slug: hookii_mower_map
+description: >-
+  Live SVG yard visualizer for Hookii Neomow robot mowers. Subscribes to the
+  same local Mosquitto/EMQX broker the Hookii Bridge add-on publishes to,
+  captures the cloud's STATUS / DEVICE_MAP_V2 / ALL_PATH_LIST_V2 messages,
+  and renders a per-mower SVG with boundary, cut/transit paths, live trail
+  and current position. Drop the iframe URL into a Lovelace iframe card.
+url: https://github.com/torvalstrom/hookii-bridge-ha-addon
+arch:
+  - amd64
+  - aarch64
+  - armv7
+init: false
+boot: auto
+startup: services
+host_network: false
+hassio_api: false
+homeassistant_api: false
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:map-outline
+panel_title: Mower Map
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: HTTP (SVG + JSON API + iframe pages)
+options:
+  mowers: ""
+  local_mqtt_host: "core-mosquitto"
+  local_mqtt_port: 1883
+  local_mqtt_user: ""
+  local_mqtt_pass: ""
+  topic_prefix: "hookii/details/device"
+  trail_max: 2000
+  log_level: "INFO"
+schema:
+  mowers: str
+  local_mqtt_host: str
+  local_mqtt_port: port
+  local_mqtt_user: str
+  local_mqtt_pass: password
+  topic_prefix: str
+  trail_max: int(100,10000)
+  log_level: list(DEBUG|INFO|WARNING|ERROR)

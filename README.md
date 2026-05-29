@@ -7,9 +7,11 @@
 > Hookii's server only keeps ONE active session per account. If the bridge and your phone app share the same account they will silently evict each other's sessions every few minutes, and you will be permanently logged out of the mobile app.
 > **Fix (5 minutes, no code):** create a second Hookii account, then from your primary account share each mower to it via the mobile app's Device Sharing menu. Configure the add-on with the new bridge account's credentials. See [DOCS.md](hookii_bridge/DOCS.md) for the full walk-through.
 
-This repository contains a single Home Assistant add-on:
+This repository contains **two** Home Assistant add-ons:
 
-- **Hookii Bridge** — a reverse-engineered Home Assistant integration for **Hookii Neomow** robot mowers. Two-way: it reads live telemetry AND sends control commands. Replaces the community workaround that broke when Hookii migrated their cloud in May 2026.
+- **Hookii Bridge** ([`hookii_bridge/`](hookii_bridge/)) — a reverse-engineered Home Assistant integration for **Hookii Neomow** robot mowers. Two-way: it reads live telemetry AND sends control commands. Replaces the community workaround that broke when Hookii migrated their cloud in May 2026. The bridge is the workhorse you almost certainly want first.
+
+- **Hookii Mower Map** ([`hookii_mower_map/`](hookii_mower_map/)) — an optional companion visualizer that subscribes to the bridge's MQTT output and renders a live SVG yard view per mower (boundary polygon, cut/transit paths, live trail, robot position + heading). Designed to drop straight into a Lovelace iframe card. See [`hookii_mower_map/DOCS.md`](hookii_mower_map/DOCS.md) for setup.
 
 ## What you actually get in Home Assistant
 
@@ -54,8 +56,9 @@ If you run **Home Assistant OS** or **Home Assistant Supervised** (the install m
    ```
 
 4. Click **Add → Close**
-5. Reload the Add-on store. **Hookii Bridge** appears under "Neomow X Home Assistant Add-on".
-6. Click it → **Install**, then follow the [Hookii Bridge setup guide](hookii_bridge/DOCS.md) — it walks through the Hookii account credentials, your mower serial number(s) and the Mosquitto broker settings the add-on needs.
+5. Reload the Add-on store. **Hookii Bridge** and **Hookii Mower Map** both appear under "Neomow X Home Assistant Add-on".
+6. Click **Hookii Bridge** → **Install**, then follow the [Hookii Bridge setup guide](hookii_bridge/DOCS.md) — it walks through the Hookii account credentials, your mower serial number(s) and the Mosquitto broker settings the add-on needs.
+7. (Optional) Once the bridge is publishing, install **Hookii Mower Map** the same way and follow the [Mower Map setup guide](hookii_mower_map/DOCS.md). It re-uses the same broker config and just needs your mower serials.
 
 To check which install method you have: **Settings → About → Installation method**. If it says "Home Assistant Container" or "Home Assistant Core", the Add-on Store is not available — use install path B instead.
 
@@ -181,6 +184,34 @@ docker stop hookii-bridge && docker rm hookii-bridge
 ```
 
 Pin to a specific release by appending `#v1.1.6` instead of `#main` to the build URL.
+
+### 6. (Optional) Adding the Mower Map alongside the bridge
+
+If you want the live SVG yard view too, add a second service to the same compose file:
+
+```yaml
+  hookii-mower-map:
+    build:
+      context: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
+      dockerfile: Dockerfile.map
+    container_name: hookii-mower-map
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - hookii-bridge
+    volumes:
+      - ./hookii-map-data:/data          # persisted boundary + last-known fix
+    environment:
+      # Format: label:serial[:color];label:serial[:color];...
+      - MOWERS=garden:HKX1EB100JD25010115:#22c55e;pond:HKX2EB100JD24080170:#3b82f6
+      - LOCAL_MQTT_HOST=127.0.0.1
+      - LOCAL_MQTT_PORT=1883
+      - LOCAL_MQTT_USER=mowermap
+      - LOCAL_MQTT_PASS=<your local broker password>
+      - LOG_LEVEL=INFO
+```
+
+The map's HTTP API is then served at `http://<host>:8000/page/<label>` — drop that URL into a Lovelace iframe card. Full configuration reference and troubleshooting in [`hookii_mower_map/DOCS.md`](hookii_mower_map/DOCS.md).
 
 ## Disclaimer
 

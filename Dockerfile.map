@@ -1,0 +1,42 @@
+# Plain-Python image for running the Hookii Mower Map outside Home Assistant
+# Supervisor.
+#
+# This is the image to use if you run Home Assistant Container, Core or k3s -
+# anywhere without the Supervisor's add-on layer. Same main.py as the HA
+# add-on (which has its own hookii_mower_map/Dockerfile based on the HA
+# Supervisor base image with bashio + run.sh wrapper). Keeping the two
+# Dockerfiles disjoint means HA OS users get bashio + options.json wiring
+# while operators running outside Supervisor get a tiny generic image
+# configurable directly via env vars.
+#
+# Build (from repo root):
+#   docker build -f Dockerfile.map -t hookii-mower-map:local .
+#
+# Build directly from GitHub (no local clone):
+#   docker build -f Dockerfile.map -t hookii-mower-map:local \
+#     https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
+#
+# Run:
+#   docker run --rm -p 8000:8000 \
+#     -e MOWERS="garden:HKX1EB100JD25010115:#22c55e" \
+#     -e LOCAL_MQTT_HOST=192.168.1.42 \
+#     -e LOCAL_MQTT_USER=mowermap -e LOCAL_MQTT_PASS=... \
+#     hookii-mower-map:local
+#
+# See hookii_mower_map/main.py for the full env list.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN pip install --no-cache-dir \
+      paho-mqtt==2.1.0 \
+      fastapi==0.115.5 \
+      uvicorn==0.32.1
+
+WORKDIR /app
+COPY hookii_mower_map/main.py /app/main.py
+
+EXPOSE 8000
+CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8000", "main:app"]
