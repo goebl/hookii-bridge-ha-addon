@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 (2026-05-29)
+
+**Yard boundary now actually renders.** Discovered by inspecting a real captured `DEVICE_MAP_V2` payload from a live mower that v1.0.1's `extract_boundary` was looking for the wrong field names entirely - `boundary` / `boundaryPoints` / `regionPoints` / `borderPoints` / `points` are NOT what the May 2026 cloud schema actually emits. The real shape is `DEVICE_MAP_V2.mapDataList[0].mowingAreaElementList[].elementPointList[].{x,y,attr}` for the territory and the parallel `exclusionAreaElementList` for no-go zones. The "translucent fill" was correctly wired into the SVG; it was just always called with an empty point list, hence the missing yard background.
+
+`extract_boundary` now returns BOTH categories: every mowing-area polygon (a Neomow can have multiple disjoint zones, e.g. front yard + back yard) and every exclusion polygon (flower beds, ponds). Mowing areas render as the translucent light-green fill from v1.0.1; exclusions punch back to a dark fill on top, so users can see where the mower will deliberately never reach. The legacy flat-key lookup is kept as a fallback for any older firmware that still uses it.
+
 ## 1.0.1 (2026-05-29)
 
 Three visual refinements after the first round of dogfood feedback comparing the SVG output to the Hookii mobile app's polished map view.

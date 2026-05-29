@@ -417,25 +417,67 @@ def extract_path_points(s: dict) -> list:
         return []
 
 
-def extract_boundary(s: dict) -> list:
+def extract_boundary(s: dict) -> dict:
+    """Pull the mowing-area + exclusion-area polygons from DEVICE_MAP_V2.
+
+    Returns a dict::
+
+        {
+            "mowing":    [ [(x, y), ...], ... ],  # the yard territory
+            "exclusion": [ [(x, y), ...], ... ],  # no-go zones (flower beds etc)
+        }
+
+    The captured payload nests these inside
+    ``data.DEVICE_MAP_V2.mapDataList[0].{mowingAreaElementList, exclusionAreaElementList}``;
+    each element has an ``elementPointList`` of point dicts ``{x, y, attr}``.
+    Older builds of this addon searched top-level keys (``boundary`` /
+    ``boundaryPoints`` / ``regionPoints`` / ``borderPoints`` / ``points``)
+    which the real cloud schema doesn't use - silent miss made the boundary
+    invisible.
+    """
+    out = {"mowing": [], "exclusion": []}
     if not s.get("device_map"):
-        return []
+        return out
     try:
         d = s["device_map"].get("data", {}).get("DEVICE_MAP_V2", {})
-        if isinstance(d, dict):
-            for key in (
-                "boundary", "boundaryPoints", "regionPoints",
-                "borderPoints", "points",
+        if not isinstance(d, dict):
+            return out
+
+        # Modern shape (May 2026 cloud): nested under mapDataList[0]
+        for map_entry in d.get("mapDataList", []) or []:
+            if not isinstance(map_entry, dict):
+                continue
+            for src_key, dst_key in (
+                ("mowingAreaElementList", "mowing"),
+                ("exclusionAreaElementList", "exclusion"),
             ):
-                pts = d.get(key)
-                if isinstance(pts, list) and pts:
-                    return [
+                for area in map_entry.get(src_key, []) or []:
+                    pts = area.get("elementPointList") if isinstance(area, dict) else None
+                    if not isinstance(pts, list) or not pts:
+                        continue
+                    poly = [
                         (p.get("x", p.get("posX", 0)), p.get("y", p.get("posY", 0)))
                         for p in pts if isinstance(p, dict)
                     ]
+                    if len(poly) >= 3:
+                        out[dst_key].append(poly)
+
+        # Legacy shape fallback - older firmware may have used flat keys.
+        if not out["mowing"]:
+            for key in ("boundary", "boundaryPoints", "regionPoints",
+                        "borderPoints", "points"):
+                pts = d.get(key)
+                if isinstance(pts, list) and pts:
+                    poly = [
+                        (p.get("x", p.get("posX", 0)), p.get("y", p.get("posY", 0)))
+                        for p in pts if isinstance(p, dict)
+                    ]
+                    if len(poly) >= 3:
+                        out["mowing"].append(poly)
+                        break
     except Exception:
         pass
-    return []
+    return out
 
 
 def render_svg(label: str) -> str:
@@ -452,13 +494,17 @@ def render_svg(label: str) -> str:
             'Waiting for data...</text></svg>'
         )
 
-    boundary_points = extract_boundary(s)
+    boundary = extract_boundary(s)
+    boundary_mowing = boundary["mowing"]
+    boundary_exclusion = boundary["exclusion"]
     path_points_for_bounds = extract_path_points(s)
-    bound_pts = []
+    bound_pts: list = []
     if path_points_for_bounds:
         bound_pts = [(p[0], p[1]) for p in path_points_for_bounds]
-    elif boundary_points:
-        bound_pts = boundary_points
+    elif boundary_mowing:
+        # Flatten all mowing polygons into one bounding sample
+        for poly in boundary_mowing:
+            bound_pts.extend(poly)
     bound_pts.append((s["robot_x"], s["robot_y"]))
 
     if len(bound_pts) > 1:
@@ -487,16 +533,28 @@ def render_svg(label: str) -> str:
     ]
     px = max(span_x, span_y) / 800  # 1 screen px in data units
 
-    # Boundary polygon is the FULL mapped yard territory - rendered as a
-    # translucent light-green fill so the cut-coverage strokes layer on top
-    # of it the same way the Hookii mobile app shows it ("light green = yet
-    # to mow, darker green = mowed").
-    if boundary_points:
+    # Yard territory: render every mowing-area polygon as a translucent
+    # light-green fill so the cut-coverage strokes layer on top the same way
+    # the Hookii mobile app shows it ("light green = yet to mow, darker green
+    # = mowed"). Each entry in DEVICE_MAP_V2.mapDataList[].mowingAreaElementList
+    # is its own polygon (a Neomow can have multiple disjoint mowing zones).
+    for poly in boundary_mowing:
         pts = " ".join(
-            f"{to_svg(x, y)[0]:.1f},{to_svg(x, y)[1]:.1f}" for x, y in boundary_points
+            f"{to_svg(x, y)[0]:.1f},{to_svg(x, y)[1]:.1f}" for x, y in poly
         )
         svg.append(
             f'<polygon points="{pts}" fill="#86efac33" stroke="#86efac55" '
+            f'stroke-width="{px*1:.1f}" stroke-linejoin="round"/>'
+        )
+    # Exclusion zones (flower beds, ponds, etc.) - punched out as a darker
+    # opaque-ish fill on top of the mowing territory, so the user can see
+    # where the mower will never reach. Matches the Hookii app convention.
+    for poly in boundary_exclusion:
+        pts = " ".join(
+            f"{to_svg(x, y)[0]:.1f},{to_svg(x, y)[1]:.1f}" for x, y in poly
+        )
+        svg.append(
+            f'<polygon points="{pts}" fill="#0f172acc" stroke="#475569" '
             f'stroke-width="{px*1:.1f}" stroke-linejoin="round"/>'
         )
 
