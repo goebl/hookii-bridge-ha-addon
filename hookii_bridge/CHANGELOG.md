@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3 (2026-05-29)
+
+- Docs: warn that the Hookii beta server's user lookup is **case-sensitive on email**. An account registered as `Foo@bar.dk` must be entered as `foo@bar.dk` in `hookii_email`; the upper-case form returns `code: 5, msg: 该用户未注册` ("user not registered") and the login fails. Discovered live with a second beta account where capital letters in the address blocked the login until we lowercased them. Added an explicit lowercase instruction on the `hookii_email` field and a new troubleshooting entry.
+
 ## 1.0.2 (2026-05-29)
 
 - Docs: prominent warning across the repo README, add-on README, DOCS.md, config description and troubleshooting section that this add-on **requires Hookii BETA firmware `1.6.8.4-beta` or newer**. Mowers on stable firmware do not push to `iot.beta.hookii.com` and the bridge has no way to make the cloud talk to them. Added explicit prerequisite step and a troubleshooting entry for the "REST login OK but no STATUS arriving" symptom that stable-firmware users will hit.

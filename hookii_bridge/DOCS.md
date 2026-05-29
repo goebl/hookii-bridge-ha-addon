@@ -54,7 +54,7 @@ The two options produce the same login result; pick whichever you're more comfor
 
    | Field | What to put |
    |---|---|
-   | `hookii_email` | Your Hookii account email. |
+   | `hookii_email` | Your Hookii account email **in lowercase**. The Hookii beta server's user lookup is case-sensitive (a `Jannick@…` account fails with `code: 5, msg: 该用户未注册` while `jannick@…` succeeds). Type it lowercase even if you registered the address with capital letters. |
    | `hookii_password` | Either your cleartext password, or its uppercase MD5 hash (see above). |
    | `mower_serials` | Your mower serial number(s). Multiple are comma-separated, e.g. `HKX1EB100JD25010115,HKX2EB100JD24080170`. |
    | `local_mqtt_host` | Leave as `core-mosquitto` if you use the official broker add-on. |
@@ -239,6 +239,7 @@ If you want more (chassis attitude, lift sensors, individual drive motor stats, 
 
 ## Troubleshooting
 
+- **REST login fails with `code: 5, msg: 该用户未注册` ("user not registered").** The Hookii beta server is case-sensitive on email. Re-enter `hookii_email` **in lowercase** even if you originally registered with capital letters - this fixes it in nearly every case.
 - **REST login OK, MQTT connected, but no `RX hk/server/mower/push/...` lines ever appear.** The single most common cause: at least one of your mowers is still on stable firmware. The add-on connects to `iot.beta.hookii.com`, which is only populated by mowers on Hookii BETA firmware `1.6.8.4-beta` or newer. Open the Hookii app, confirm each mower's firmware has the `…-beta` suffix, and let pending updates install before retrying.
 - **No sensors update at all.** Double-check the bridge logs show `cloud-mqtt connected` AND a `RX hk/server/mower/push/...` line within ~30 s. If the second is missing, the heartbeat isn't being accepted — verify your account works in the official Hookii app first.
 - **REST login OK but `mowing_zero` / serial mismatch.** Open the bridge log, look for `learned model=… for serial=…`. If your serial never shows up there, you typed the wrong one in `mower_serials`. Check it against the Hookii app.
