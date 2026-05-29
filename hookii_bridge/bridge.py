@@ -1,38 +1,65 @@
-"""Hookii Neomow X Pro → local MQTT bridge.
+"""Hookii Neomow → local MQTT bridge.
 
-Background: as of 2026-05-28 Hookii migrated their cloud IoT from the
+Background: as of May 2026 Hookii migrated their cloud IoT from the
 plain ``hookii/details/device/<serial>`` topic format on their public
 broker to a JWT-gated push protocol on ``iot.beta.hookii.com:8883``.
 The new server gates STATUS pushes on a live heartbeat from the client
 carrying the user's REST-issued JWT. A passive MQTT subscriber sees
 nothing.
 
-This bridge runs in k3s (ns: home-assistant), keeps a heartbeat alive
-per (user-account, mower-serial) pair, and republishes the inbound
-STATUS payloads to the LOCAL EMQX broker (127.0.0.1:1883) on the OLD
-topic format so existing HA template-sensors + n8n battery-health
-workflow continue working unchanged.
+This bridge keeps that heartbeat alive per (user-account, mower-serial)
+pair, normalises the cloud's STATUS payload back to the legacy field
+shape, and republishes it to a LOCAL MQTT broker on the OLD topic
+format so any existing Home Assistant template-sensors, automations
+or n8n flows that read ``hookii/details/device/<serial>`` keep working
+without modification.
+
+It is plain Python + paho-mqtt + requests with no host-specific
+dependencies; it runs equally fine as:
+
+  * a Home Assistant Supervisor add-on (the ``hookii-bridge-ha-addon``
+    repo wraps this script with a bashio run.sh that reads
+    ``/data/options.json`` and exports the same env-vars listed below);
+  * a systemd service on Linux / a Windows Service / Docker Compose
+    workload pointed at any local Mosquitto / EMQX / RabbitMQ
+    broker that speaks MQTT 3.1.1.
 
 Configuration via env:
-    HOOKII_ACCOUNTS   "tor:tv@itgap.com:<pw>;jannick:<email>:<pw>" -
-                      semicolon-separated account specs. Label is free-form
-                      (used for log lines + per-account dedup).
+    HOOKII_ACCOUNTS   "<label>:<email>:<pw>;..." - semicolon-separated
+                      account specs. Label is free-form (used for log
+                      lines + per-account dedup). Most users have one
+                      account; supply just one spec without semicolons.
+                      Password may be cleartext OR a 32-char uppercase
+                      MD5 hash (auto-detected).
     HOOKII_REST_HOST  default iot.beta.hookii.com:10443
     HOOKII_MQTT_HOST  default iot.beta.hookii.com:8883
-    HOOKII_MQTT_USER  default hookii-iot
-    HOOKII_MQTT_PASS  default ukLWdAbvRF3JVqNyTdAVJsMx
-    HOOKII_MODEL      default 0002 (Pro). Non-Pro mowers may differ - log
-                      the actual modelCode observed and patch.
+    HOOKII_MQTT_USER  default hookii-iot (shared static, same as the
+                      official Hookii mobile app uses)
+    HOOKII_MQTT_PASS  default ukLWdAbvRF3JVqNyTdAVJsMx (ditto)
+    HOOKII_MODEL      default 0002 (Pro). The bridge auto-learns the
+                      actual model code per serial from the first
+                      observed STATUS push, so this rarely needs
+                      overriding.
 
     LOCAL_MQTT_HOST   default 127.0.0.1
     LOCAL_MQTT_PORT   default 1883
-    LOCAL_MQTT_USER   required (from k8s Secret)
-    LOCAL_MQTT_PASS   required (from k8s Secret)
-    LOCAL_TOPIC_FMT   default "hookii/details/device/{serial}" — preserves
-                      the existing HA wiring.
+    LOCAL_MQTT_USER   required - an MQTT user on your local broker that
+                      can publish to LOCAL_TOPIC_FMT
+    LOCAL_MQTT_PASS   required - that user's password
+    LOCAL_TOPIC_FMT   default "hookii/details/device/{serial}" -
+                      the placeholder {serial} is interpolated per
+                      mower; preserves the legacy HA-wiring topic.
 
     HEARTBEAT_SEC     default 15
-    LOG_LEVEL         default INFO
+    LOG_LEVEL         default INFO. Set to DEBUG only when
+                      troubleshooting - it logs every inbound topic.
+
+    HOOKII_SERIALS_<LABEL>
+                      Optional override of the device-list returned by
+                      REST login. Example for label "addon":
+                        HOOKII_SERIALS_ADDON=HKX1...,HKX2...
+                      Useful because Hookii's login response doesn't
+                      always enumerate devices reliably.
 """
 from __future__ import annotations
 
@@ -166,9 +193,10 @@ def md5_upper(s: str) -> str:
     """Hookii password hash: MD5(cleartext) upper-cased hex.
 
     If `s` already looks like a 32-char hex MD5 digest, treat it as
-    already-hashed and just upper-case it. This lets us configure
-    Jannick's account (operator gave us the hash, not the cleartext)
-    via the same HOOKII_ACCOUNTS env mechanism.
+    already-hashed and just upper-case it. This lets users who'd rather
+    not store their cleartext password supply the MD5-uppercased digest
+    directly via HOOKII_ACCOUNTS - the bridge auto-detects and skips
+    the re-hashing step.
     """
     if _HEX32.match(s):
         return s.upper()
@@ -353,10 +381,10 @@ class AccountClient:
         LOG.info("[%s] cloud-mqtt connected as %s, subscribing to %d serial(s)",
                  self.acct.label, self.client_id, len(self.acct.serials))
         for sn in self.acct.serials:
-            # Wildcard model code in the topic - Tor's mowers are Pro (0002)
-            # but Jannick's non-Pro likely uses a different code. We don't
-            # know all codes a priori so subscribe to "+" and let the server
-            # filter by JWT authorization.
+            # Wildcard model code in the topic - Neomow X Pro uses 0002,
+            # other models likely use different codes. We don't know all
+            # codes a priori, so subscribe to "+" and let the server filter
+            # by the JWT authorisation carried in our heartbeat.
             topic = f"hk/server/mower/push/+/{sn}"
             client.subscribe(topic, qos=1)
             LOG.info("[%s] SUB %s", self.acct.label, topic)

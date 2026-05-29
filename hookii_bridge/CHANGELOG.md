@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 (2026-05-29)
+
+- Docs-only: scrubbed Conscient Systems / k3s-specific references from `bridge.py` docstrings so the file reads cleanly as a standalone Python script for HA OS users (or for anyone else who wants to run it under systemd / Docker Compose / etc.). No behaviour change.
+
 ## 1.0.0 (2026-05-29)
 
 - Initial public release.
