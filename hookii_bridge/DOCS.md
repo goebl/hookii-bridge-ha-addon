@@ -52,7 +52,7 @@ The two options produce the same login result; pick whichever you're more comfor
    - Settings → Add-ons → Add-on Store → **⋮** → Repositories → paste
 
      ```
-     https://github.com/conscientsystems/hookii-bridge-ha-addon
+     https://github.com/torvalstrom/hookii-bridge-ha-addon
      ```
 
    - Click Add → Close → reload.
@@ -304,4 +304,4 @@ If you want more (chassis attitude, lift sensors, individual drive motor stats, 
 
 ## Support
 
-Issues, feature requests and "it worked / it didn't work on my model" reports: <https://github.com/conscientsystems/hookii-bridge-ha-addon/issues>
+Issues, feature requests and "it worked / it didn't work on my model" reports: <https://github.com/torvalstrom/hookii-bridge-ha-addon/issues>

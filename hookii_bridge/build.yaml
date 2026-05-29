@@ -5,5 +5,5 @@ build_from:
 labels:
   org.opencontainers.image.title: "Hookii Bridge"
   org.opencontainers.image.description: "Cloud bridge for Hookii Neomow robot mowers"
-  org.opencontainers.image.source: "https://github.com/conscientsystems/hookii-bridge-ha-addon"
+  org.opencontainers.image.source: "https://github.com/torvalstrom/hookii-bridge-ha-addon"
   org.opencontainers.image.licenses: "Apache-2.0"

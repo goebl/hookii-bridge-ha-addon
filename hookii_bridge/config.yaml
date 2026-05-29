@@ -1,5 +1,5 @@
 name: Hookii Bridge
-version: "1.1.0"
+version: "1.1.1"
 slug: hookii_bridge
 description: >-
   REQUIRES Hookii BETA firmware 1.6.8.4-beta or newer. Reverse-engineered
@@ -8,7 +8,7 @@ description: >-
   command channel for start/pause/return/stop, publishes Home Assistant
   MQTT Discovery configs so a lawn_mower entity + 5 buttons + telemetry
   sensors appear in HA without any YAML.
-url: https://github.com/conscientsystems/hookii-bridge-ha-addon
+url: https://github.com/torvalstrom/hookii-bridge-ha-addon
 arch:
   - amd64
   - aarch64

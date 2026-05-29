@@ -1,4 +1,4 @@
-# Conscient Systems Home Assistant Add-ons
+# Tor Valstrom Home Assistant Add-ons
 
 > ⚠️ **Requires Hookii BETA firmware `1.6.8.4-beta` or newer on every mower this bridge talks to.**
 > The new cloud protocol this add-on speaks (`iot.beta.hookii.com`) is only live on the Hookii BETA channel. **Mowers on the stable firmware channel will not work.** Switch each mower to the Beta channel in the Hookii mobile app before installing.
@@ -14,11 +14,11 @@ This repository contains a single Home Assistant add-on:
 3. Paste this URL:
 
    ```
-   https://github.com/conscientsystems/hookii-bridge-ha-addon
+   https://github.com/torvalstrom/hookii-bridge-ha-addon
    ```
 
 4. Click **Add → Close**
-5. Reload the Add-on store. **Hookii Bridge** appears under "Conscient Systems Add-ons".
+5. Reload the Add-on store. **Hookii Bridge** appears under "Tor Valstrom Add-ons".
 6. Click it → **Install**, then follow the [Hookii Bridge setup guide](hookii_bridge/DOCS.md).
 
 ## Why does this exist?

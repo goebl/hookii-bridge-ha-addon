@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 (2026-05-29)
+
+- Add `robotStatus = 4` to the "docked" derivation. Observed live on at least one Pro mower at trickle-charge state; not documented in the protocol reference but always co-occurs with `workingMode = 0` and near-zero `chargeCurrent`. Without this, `ha_state` would stay unset on those payloads and the `lawn_mower` entity would flap to "previous state".
+
 ## 1.1.0 (2026-05-29)
 
 **New: REST command channel + MQTT Discovery.** Big release.

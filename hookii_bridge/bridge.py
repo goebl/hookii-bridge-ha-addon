@@ -16,46 +16,11 @@ MQTT Discovery configs so a `lawn_mower` entity and five command
 buttons appear in HA without the user touching YAML.
 
 Plain Python + paho-mqtt + requests with no host-specific dependencies;
-runs equally well as:
+runs equally well as a Home Assistant Supervisor add-on, systemd
+service, or Docker Compose workload pointed at any local Mosquitto /
+EMQX / RabbitMQ broker.
 
-  * a Home Assistant Supervisor add-on (the ``hookii-bridge-ha-addon``
-    repo wraps this script with a bashio run.sh that reads
-    ``/data/options.json`` and exports the same env-vars listed below);
-  * a systemd service on Linux / a Windows Service / Docker Compose
-    workload pointed at any local Mosquitto / EMQX / RabbitMQ broker.
-
-Configuration via env:
-    HOOKII_ACCOUNTS   "<label>:<email>:<pw>;..." - semicolon-separated
-                      account specs. Most users have one. Password can
-                      be cleartext OR a 32-char MD5-uppercase hash
-                      (auto-detected).
-    HOOKII_REST_HOST  default iot.beta.hookii.com:10443
-    HOOKII_MQTT_HOST  default iot.beta.hookii.com:8883
-    HOOKII_MQTT_USER  default hookii-iot (shared with the mobile app)
-    HOOKII_MQTT_PASS  default ukLWdAbvRF3JVqNyTdAVJsMx (ditto)
-    HOOKII_MODEL      default 0002 (Pro). Bridge auto-learns the actual
-                      model per serial from the first observed STATUS.
-    HOOKII_AGENT      client fingerprint sent on every REST request.
-                      Default is a plausible Android/Xiaomi string;
-                      override if you want a different fingerprint.
-
-    LOCAL_MQTT_HOST   default 127.0.0.1
-    LOCAL_MQTT_PORT   default 1883
-    LOCAL_MQTT_USER   required
-    LOCAL_MQTT_PASS   required
-    LOCAL_TOPIC_FMT   default "hookii/details/device/{serial}"
-    CMD_TOPIC_FMT     default "hookii/cmd/{serial}/{action}"
-
-    ENABLE_DISCOVERY  "1" (default) publishes HA MQTT-Discovery configs.
-    DISCOVERY_PREFIX  default "homeassistant" (matches HA default).
-
-    HEARTBEAT_SEC     default 15
-    LOG_LEVEL         default INFO
-
-    HOOKII_SERIALS_<LABEL>
-                      Optional override of the device-list returned by
-                      REST login. Example for label "addon":
-                        HOOKII_SERIALS_ADDON=HKX1...,HKX2...
+Configuration via env: see DOCS.md / the add-on Configuration tab.
 """
 from __future__ import annotations
 
@@ -188,31 +153,51 @@ def normalise_status(payload: dict) -> None:
     #    reverse-engineered command/state reference). This lets the
     #    discovered lawn_mower entity use a stable activity field and saves
     #    every user from writing the same template logic by hand.
+    #
+    #    NOT every STATUS shape carries robotStatus - Shape A only has the
+    #    higher-level workingMode (0/1/2) so we fall back to that when
+    #    robotStatus is absent. This keeps ha_state populated on every
+    #    STATUS message instead of half of them.
     rs = status.get("robotStatus")
     wm = status.get("workingMode")
+    cc = status.get("chargeCurrent")
+    ha_state: str | None = None
+    ha_is_charging = False
     if rs == 5:
-        status["ha_state"] = "docked"
-        status["ha_is_charging"] = True
-    elif rs in (0, 3):
-        status["ha_state"] = "docked"
-        status["ha_is_charging"] = False
+        # Confirmed in the reference: "Charging at dock".
+        ha_state, ha_is_charging = "docked", True
+    elif rs in (0, 3, 4):
+        # 0=idle, 3=sleeping, 4=at-dock-trickle (observed live, undocumented
+        # in the reference but always co-occurs with wm=0 + near-zero
+        # chargeCurrent so it's clearly a docked sub-state).
+        ha_state = "docked"
     elif rs in (9, 10):
-        status["ha_state"] = "returning"
-        status["ha_is_charging"] = False
+        ha_state = "returning"
     elif rs == 7:
         # robotStatus=7 is the "travelling" sub-state. workingMode=1 means
         # the higher-level intent is "go home"; workingMode=2 means "work"
         # so we're transiting between zones mid-job.
-        status["ha_state"] = "returning" if wm == 1 else "mowing"
-        status["ha_is_charging"] = False
+        ha_state = "returning" if wm == 1 else "mowing"
     elif rs in (1, 2):
-        status["ha_state"] = "mowing"
-        status["ha_is_charging"] = False
-    else:
-        # Unknown robotStatus value (firmware update, edge state) - leave
-        # the previous value alone by NOT setting ha_state; consumers'
-        # templates already handle the "previous-state" fallback.
-        pass
+        ha_state = "mowing"
+    elif rs is None:
+        # No robotStatus (typical Shape A, or sparse heartbeat) - derive
+        # from workingMode alone. workingMode 0 = idle/parked, 1 = returning,
+        # 2 = working. chargeCurrent > 0 means current is flowing into the
+        # battery so the mower is at the dock charging.
+        if wm == 0:
+            ha_state = "docked"
+            if isinstance(cc, (int, float)) and cc > 0:
+                ha_is_charging = True
+        elif wm == 1:
+            ha_state = "returning"
+        elif wm == 2:
+            ha_state = "mowing"
+    # else: still-unknown robotStatus value (future firmware) - leave
+    # ha_state unset so HA templates fall back to previous-state.
+    if ha_state is not None:
+        status["ha_state"] = ha_state
+        status["ha_is_charging"] = ha_is_charging
 
 
 def md5_upper(s: str) -> str:
