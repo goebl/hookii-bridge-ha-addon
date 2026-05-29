@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.2 (2026-05-29)
+
+**Heartbeat cadence aligned with the Hookii mobile app (1.5s, was 15s).** Strongly recommended update for everyone running 1.1.x.
+
+PCAP analysis of the official Hookii Android app's MQTT traffic showed it heartbeats to `hk/app/mower/hb/<model>/<serial>` at exactly 1.5 second intervals (variance < 1ms). The bridge was at 15s, which created a session-aging mismatch on Hookii's server: it likely treated the bridge as a "slower / older" session relative to a concurrently active phone app, and intermittently evicted one or the other. Symptom: mobile app silently logged out every ~hour while the bridge was running.
+
+Changes:
+
+- `heartbeat_sec` is now a float (was int). Defaults to `1.5` (was `15`). Sub-second sleep loop still polls the stop signal at 0.5s granularity so SIGTERM behaves.
+- The add-on's `heartbeat_seconds` option still accepts an int, but 1 (the closest representable to the spec) is the sensible floor; the addon's run.sh forwards the value through `HEARTBEAT_SEC` env so power users can override at sub-second precision via env if they're running outside the add-on.
+
+If your phone app has been getting logged out periodically since installing earlier 1.1.x, that should stop after upgrading to 1.1.2.
+
 ## 1.1.1 (2026-05-29)
 
 - Add `robotStatus = 4` to the "docked" derivation. Observed live on at least one Pro mower at trickle-charge state; not documented in the protocol reference but always co-occurs with `workingMode = 0` and near-zero `chargeCurrent`. Without this, `ha_state` would stay unset on those payloads and the `lawn_mower` entity would flap to "previous state".
