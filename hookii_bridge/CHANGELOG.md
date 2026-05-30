@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.2.0 (2026-05-30)
+
+**Two new control commands, both reverse-engineered from a 2026-05-30 PCAP of the official Hookii Android app handling a docking-failure 515 incident.**
+
+### `recover_alarm` — clear a remote-recoverable exception
+
+When the mower trips a remote-recoverable error like *Docking failed (515): please check for any obstruction near the charging station*, the official app exposes a "slide OK to resolve" affordance that POSTs `/api/v1/mower/remote/recovery/alarm` with the same `reqOprType=0` then `reqOprType=1` polling pattern start/pause/return already use. The endpoint signals completion with `code=61` ("割草机远程恢复告警指令临时资源已过期" = "temporary resources expired") instead of the `result==1` marker `start/stop/job` uses; the new `cmd_recover_alarm_with_poll` understands this terminal state so it doesn't log code=61 as a failure.
+
+Exposed as:
+
+- A button entity per mower: `button.hookii_<serial>_recover_alarm` with the `mdi:auto-fix` icon and friendly label *Clear exception*.
+- A raw MQTT topic for automations: `hookii/cmd/<serial>/recover_alarm` (payload `{}`).
+
+Drop the button onto a Lovelace card or wire an HA automation triggered on a 515 error to auto-self-heal docking failures without manual intervention.
+
+### `snapshot` — on-demand camera image from the mower
+
+The same anomaly flow lets the app fetch a fresh photo from the mower's onboard camera. Two-step protocol PCAP-confirmed:
+
+1. `POST /api/v1/mower/capture/image` → server returns `{result, fileName, fileUrl}`. The fileUrl is single-shot, hashed and short-lived.
+2. `GET <fileUrl>` over HTTPS on port 9443 (a separate Hookii CDN host) → JPG bytes.
+
+The bridge does both legs and republishes the JPG bytes retained to `hookii/snapshot/<serial>`. An auto-discovered MQTT camera entity (`camera.hookii_<serial>_last_snapshot`) shows the most recent one and survives HA restarts.
+
+Exposed as:
+
+- A button: `button.hookii_<serial>_snapshot` with the `mdi:camera` icon and label *Camera snapshot*.
+- An MQTT camera: `camera.hookii_<serial>_last_snapshot` with `mdi:camera-iris`.
+- Raw topics: `hookii/cmd/<serial>/snapshot` to trigger; `hookii/snapshot/<serial>` to consume.
+
+Wire the camera entity into any `picture-entity` Lovelace card for a tap-to-refresh live yard view from anywhere the mower has 4G or WiFi.
+
+### Discovery count
+
+The discovery log now reports `19 entities` per mower (was 20 — but the 14 sensors + lawn_mower were already there; this commit grows the button set from 5 to 7 and adds the camera entity, so an existing install gains 3 new discoverable entities on next pod restart). The count line was previously double-counting the lawn_mower; corrected.
+
 ## 1.1.9 (2026-05-29)
 
 **Extend the `deviceRegionTask` backward-compat alias to include `uncutArea`.** Discovered after v1.1.8 deploy that pre-May-2026 ETA-style templates also read `deviceRegionTask.uncutArea` (the old name for what the new cloud calls `unMowedArea`). v1.1.8 aliased `cutArea`/`mowedArea` and `mowingCoverageRate`/`mowingCoverage` but missed the un-cut counterpart; HA was logging `UndefinedError: 'dict object' has no attribute 'uncutArea'` for any template that extrapolated remaining time from the ratio. Now reconstructed alongside the other two aliases.

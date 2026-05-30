@@ -569,6 +569,118 @@ def cmd_schedule_write(cfg: Config, acct: HookiiAccount, serial: str, model: str
     return _hookii_post(cfg, acct, "/api/v1/mower/cmd/calendar/time", body)
 
 
+def cmd_camera_snapshot(cfg: Config, acct: HookiiAccount, serial: str,
+                        model: str) -> bytes | None:
+    """Trigger an on-demand camera snapshot from the mower and return the JPG
+    bytes, or None on failure.
+
+    Two-step protocol PCAP-confirmed 2026-05-30:
+
+    1. POST /api/v1/mower/capture/image  body={serialNumber, modelCode}
+       -> data={result:true, fileName:..., fileUrl: 'https://...:9443/...'}
+    2. GET  <fileUrl>   -> JPG bytes (port 9443 is a separate CDN host)
+
+    The fileUrl is single-shot - a random hash per snapshot, and the file
+    expires after a short TTL on the CDN. So we always GET it immediately
+    while it's still warm.
+    """
+    body = {"serialNumber": serial, "modelCode": model}
+    data = _hookii_post(cfg, acct, "/api/v1/mower/capture/image", body)
+    if not data or not data.get("result"):
+        LOG.warning("[%s] snapshot: server declined or empty data: %s", acct.label, data)
+        return None
+    file_url = data.get("fileUrl")
+    if not file_url:
+        LOG.warning("[%s] snapshot: response missing fileUrl: %s", acct.label, data)
+        return None
+    try:
+        r = requests.get(file_url, headers=hookii_headers(token=acct.jwt or ""),
+                         timeout=20, verify=False)
+        if r.status_code != 200:
+            LOG.warning("[%s] snapshot: GET %s -> %d", acct.label, file_url, r.status_code)
+            return None
+        return r.content
+    except requests.RequestException:
+        LOG.exception("[%s] snapshot: GET %s transport error", acct.label, file_url)
+        return None
+
+
+def cmd_recover_alarm(cfg: Config, acct: HookiiAccount, serial: str, model: str,
+                      req_opr_type: int = 0) -> tuple[int | None, dict]:
+    """Send (or poll) the remote-recovery-alarm command. Returns (code, data).
+
+    Returns the WHOLE response envelope's code so callers can detect the
+    code=61 "temporary resources expired" terminal state that this endpoint
+    uses to signal completion instead of the result==1 marker used by
+    start/stop/job. PCAP-confirmed 2026-05-30.
+    """
+    body = {
+        "serialNumber": serial,
+        "modelCode": model,
+        "response": None,
+        "reqOprType": req_opr_type,
+    }
+    # We can't use the regular _hookii_post here - it swallows code=61 as a
+    # warning. Inline the auth+post logic and surface the code directly.
+    url = f"https://{cfg.rest_host}:{cfg.rest_port}/api/v1/mower/remote/recovery/alarm"
+    for attempt in (1, 2):
+        try:
+            r = requests.post(url, json=body, headers=hookii_headers(token=acct.jwt or ""), timeout=20)
+        except requests.RequestException:
+            LOG.exception("[%s] recover_alarm transport error (attempt %d)", acct.label, attempt)
+            return None, {}
+        if r.status_code == 401 and attempt == 1:
+            try:
+                hookii_login(cfg, acct)
+            except Exception:
+                return None, {}
+            continue
+        try:
+            envelope = r.json()
+        except Exception:
+            return None, {}
+        code = envelope.get("code") if isinstance(envelope, dict) else None
+        if code == 10 and attempt == 1:
+            try:
+                hookii_login(cfg, acct)
+            except Exception:
+                return None, {}
+            continue
+        return code, (envelope.get("data") if isinstance(envelope, dict) else None) or {}
+    return None, {}
+
+
+def cmd_recover_alarm_with_poll(cfg: Config, acct: HookiiAccount, serial: str,
+                                model: str) -> dict:
+    """Submit a recover_alarm (reqOprType=0) then poll (reqOprType=1) until
+    the server returns code=61 ("temporary resources expired" = the action
+    completed and the server cleared its temporary state) or
+    _CMD_POLL_TIMEOUT elapses. Returns the last response.data payload."""
+    code, data = cmd_recover_alarm(cfg, acct, serial, model, req_opr_type=0)
+    LOG.info("[%s] recover_alarm initial: code=%s data=%s", acct.label, code, data)
+    if code is None:
+        return {}
+    if code == 61:
+        # Action terminated immediately - already done.
+        return {"completed": True}
+    deadline = time.time() + _CMD_POLL_TIMEOUT
+    poll_n = 0
+    while time.time() < deadline:
+        time.sleep(_CMD_POLL_INTERVAL)
+        poll_n += 1
+        code, data = cmd_recover_alarm(cfg, acct, serial, model, req_opr_type=1)
+        if code == 61:
+            LOG.info("[%s] recover_alarm finalised after %d poll(s) (code=61, action complete)",
+                     acct.label, poll_n)
+            return {"completed": True}
+        if code not in (0, 1):
+            LOG.warning("[%s] recover_alarm poll %d -> code=%s (giving up)", acct.label, poll_n, code)
+            return data
+    LOG.warning("[%s] recover_alarm did not finalise within %.1fs (last code=%s)",
+                acct.label, _CMD_POLL_TIMEOUT, code)
+    return data
+
+
 def cmd_params_read(cfg: Config, acct: HookiiAccount, serial: str, model: str) -> dict:
     body = {
         "command": 0, "response": None,
@@ -624,14 +736,23 @@ def publish_discovery(local: mqtt.Client, cfg: Config, serial: str) -> None:
         topic = f"{prefix}/{component}/hookii_{serial}/{object_id}/config"
         local.publish(topic, json.dumps(body), qos=1, retain=True)
 
-    # 1. Five buttons (each posts an empty JSON object as the "press" payload;
+    # 1. Seven buttons (each posts an empty JSON object as the "press" payload;
     #    the bridge dispatcher reads serial + action from the topic).
     for action, name, icon in [
-        ("start",      "Start",                  "mdi:play"),
-        ("pause",      "Pause",                  "mdi:pause"),
-        ("return",     "Return to dock",         "mdi:home-import-outline"),
-        ("stop_keep",  "Stop (keep progress)",   "mdi:stop"),
-        ("stop_clear", "Stop (clear progress)",  "mdi:stop-circle-outline"),
+        ("start",          "Start",                  "mdi:play"),
+        ("pause",          "Pause",                  "mdi:pause"),
+        ("return",         "Return to dock",         "mdi:home-import-outline"),
+        ("stop_keep",      "Stop (keep progress)",   "mdi:stop"),
+        ("stop_clear",     "Stop (clear progress)",  "mdi:stop-circle-outline"),
+        # Self-heal a remote-recoverable exception (e.g. docking-failure
+        # 515). Maps to /api/v1/mower/remote/recovery/alarm with the
+        # reqOprType=0/1 poll pattern.
+        ("recover_alarm",  "Clear exception",        "mdi:auto-fix"),
+        # On-demand camera snapshot. Bridge POSTs /api/v1/mower/capture/image,
+        # downloads the resulting JPG and republishes it retained to
+        # hookii/snapshot/<serial>; the auto-discovered MQTT camera entity
+        # picks it up and shows the latest snapshot.
+        ("snapshot",       "Camera snapshot",        "mdi:camera"),
     ]:
         _publish("button", action, {
             "name": name,
@@ -641,6 +762,20 @@ def publish_discovery(local: mqtt.Client, cfg: Config, serial: str) -> None:
             "icon": icon,
             "device": device,
         })
+
+    # 1b. MQTT camera entity backed by hookii/snapshot/<serial>. The "Camera
+    #     snapshot" button above triggers a fresh capture; this entity shows
+    #     the most recent one. Retained image survives HA restarts. We omit
+    #     `image_encoding` so HA treats the payload as raw JPG bytes (the
+    #     default when the key is absent); setting it to "b64" would expect
+    #     base64-encoded text instead.
+    _publish("camera", "snapshot", {
+        "name": "Last snapshot",
+        "unique_id": f"hookii_{serial}_camera",
+        "topic": f"hookii/snapshot/{serial}",
+        "icon": "mdi:camera-iris",
+        "device": device,
+    })
 
     # 2. Standard lawn_mower entity. The activity_value_template extracts our
     #    derived ha_state field from STATUS payloads; non-STATUS msgTypes
@@ -697,7 +832,7 @@ def publish_discovery(local: mqtt.Client, cfg: Config, serial: str) -> None:
             body["icon"] = icon
         _publish("sensor", obj, body)
 
-    LOG.info("discovery: published %d entities for %s", 5 + 1 + len(sensors), serial)
+    LOG.info("discovery: published %d entities for %s", 7 + 1 + 1 + len(sensors), serial)
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +1008,32 @@ class AccountClient:
                     f"hookii/result/{serial}/params",
                     json.dumps(data), qos=1, retain=True,
                 )
+            elif action == "recover_alarm":
+                # Self-heal a remote-recoverable exception (e.g. docking
+                # failure 515). PCAP-confirmed 2026-05-30: same reqOprType=0
+                # then reqOprType=1 polling pattern as start/stop/job; the
+                # endpoint signals completion with code=61 ("temporary
+                # resources expired") which is success not failure.
+                cmd_recover_alarm_with_poll(self.cfg, self.acct, serial, model)
+            elif action == "snapshot":
+                # On-demand camera snapshot. The JPG bytes are published
+                # retained to hookii/snapshot/<serial> so the auto-discovered
+                # MQTT camera entity displays the latest image until the
+                # next snapshot replaces it.
+                jpg = cmd_camera_snapshot(self.cfg, self.acct, serial, model)
+                if jpg:
+                    self.local.publish(
+                        f"hookii/snapshot/{serial}",
+                        jpg, qos=1, retain=True,
+                    )
+                    LOG.info("[%s] snapshot published: %d bytes",
+                             self.acct.label, len(jpg))
+                else:
+                    self.local.publish(
+                        f"hookii/result/{serial}/error",
+                        json.dumps({"action": "snapshot", "error": "capture or download failed"}),
+                        qos=1, retain=False,
+                    )
             else:
                 LOG.warning("[%s] unknown cmd action %r (serial %s)", self.acct.label, action, serial)
         except ValueError as e:
