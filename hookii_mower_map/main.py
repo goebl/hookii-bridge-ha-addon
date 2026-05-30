@@ -399,6 +399,21 @@ def mqtt_listener() -> None:
 # ---------------------------------------------------------------------------
 
 def extract_path_points(s: dict) -> list:
+    """Return [(x, y, info), ...] where info=1 means "this segment is a cut
+    swath" and info=0 means "transit only - the blade was idle".
+
+    May 2026 cloud schema CHANGE: the per-point dict only carries `{x, y}` -
+    the cut/transit classification lives on the SEGMENT in
+    `ALL_PATH_INDEX_V2.indexInfoList`, expressed as
+    `{startIndex, endIndex, info}`. Earlier addon versions read
+    `point.info` which is now always 0 on this firmware - that made the
+    entire path render as transit (thin/light) and the cut overlay never
+    appeared, so the SVG looked like an uncoloured boundary regardless of
+    how much the mower had actually mowed. Verified 2026-05-30 against
+    Greenhouse capture: 31260 points, all `info=0`; segment index had
+    39 entries with the real cut/transit alternation. Fix: project the
+    segment-level `info` down to per-point info before decimating.
+    """
     if not s.get("path_list"):
         return []
     try:
@@ -409,10 +424,52 @@ def extract_path_points(s: dict) -> list:
         if not pl:
             return []
         points = pl[0].get("pathPointList", [])
+        if not points:
+            return []
+
+        # Build a per-point info array from the segment index, if we have it.
+        # Fall back to per-point .info (legacy / pre-May-2026 firmware), and
+        # finally to 0 if neither channel exists.
+        point_info = [None] * len(points)
+        idx_segs = []
+        if s.get("path_index"):
+            try:
+                idx_list = (
+                    s["path_index"].get("data", {}).get("ALL_PATH_INDEX_V2", {})
+                    .get("pathIndexList", [])
+                )
+                if idx_list:
+                    idx_segs = idx_list[0].get("indexInfoList", []) or []
+            except Exception:
+                idx_segs = []
+
+        for seg in idx_segs:
+            try:
+                start = int(seg.get("startIndex", 0))
+                end = int(seg.get("endIndex", 0))
+                info = int(seg.get("info", 0))
+            except Exception:
+                continue
+            for i in range(max(0, start), min(end, len(point_info))):
+                point_info[i] = info
+
+        # Anywhere the segment-index didn't cover, fall back to per-point info
+        # (legacy schema), then 0.
+        for i, p in enumerate(points):
+            if point_info[i] is None:
+                point_info[i] = p.get("info", 0)
+
+        # Decimate path + per-point-info in lockstep so the cut/transit
+        # boundaries stay aligned in the rendered SVG.
         if len(points) > 4000:
             step = len(points) // 4000
             points = points[::step]
-        return [(p.get("x", 0), p.get("y", 0), p.get("info", 0)) for p in points]
+            point_info = point_info[::step]
+
+        return [
+            (p.get("x", 0), p.get("y", 0), info)
+            for p, info in zip(points, point_info)
+        ]
     except Exception:
         return []
 
