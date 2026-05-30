@@ -129,6 +129,43 @@ mosquitto_pub -h <broker> -u <user> -P <pass> \
 # Result echoes back to hookii/result/HKX1EB100JD25010115/schedule (retained).
 ```
 
+## Ready-made automations (Blueprints)
+
+This repo ships a small collection of [Home Assistant Blueprints](https://www.home-assistant.io/docs/automation/using_blueprints/) that solve common Neomow X owner pain points using the bridge's MQTT command channel. Each blueprint is a single YAML file in [`blueprints/automation/torvalstrom/`](blueprints/automation/torvalstrom/) and imports into HA in two clicks.
+
+### Auto-heal failed docking (kissing dock + alarm 514/515)
+
+The Neomow X's flat-pad charging contacts oxidise and accumulate dust quickly in dry/hot weather; the dock-side spring fingers also oxidise. The combined effect: the mower often "kisses" the dock without making electrical contact (`chargeCurrent` flapping near 0 A), or throws docking alarm `514` / `515`. The older Neomow firmware had a built-in self-heal that re-docked automatically until contact succeeded - Hookii removed that behaviour in a later revision even though it worked well. This blueprint restores the equivalent in HA.
+
+**What it does**
+
+- **Path A - explicit alarm:** when the mower posts `errCode` `514`/`515` and stays in error for 60 s → publishes `hookii/cmd/<SERIAL>/recover_alarm` (clears the alarm, same as sliding "OK to resolve" in the Hookii app).
+- **Path B - kissing dock:** when battery is below the threshold AND `chargeCurrent` has been flapping inside `[-1, 1]` A for 60 s → publishes `hookii/cmd/<SERIAL>/recharge`, which the bridge translates to the same `start/stop/job` cloud call the mobile app's "Recharge" button makes. The mower physically undocks and redocks.
+- **2-minute safety net:** re-evaluates conditions every 2 min so multi-attempt recovery (often needed when the contact problem is bad) happens automatically.
+
+**Import to Home Assistant**
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ftorvalstrom%2Fhookii-bridge-ha-addon%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Ftorvalstrom%2Fneomow_x_kissing_dock_auto_heal.yaml)
+
+Or, if your HA isn't connected to [My Home Assistant](https://my.home-assistant.io/): in HA go to **Settings → Automations & Scenes → Blueprints → Import Blueprint** and paste:
+
+```
+https://github.com/torvalstrom/hookii-bridge-ha-addon/blob/main/blueprints/automation/torvalstrom/neomow_x_kissing_dock_auto_heal.yaml
+```
+
+Then click **Create Automation** on the imported blueprint and fill in the inputs:
+
+| Input | What to pick |
+|---|---|
+| **Mower serial number** | The serial printed under the mower (also visible in the Hookii app under Device Info). Used to build the MQTT command topic. |
+| **Battery sensor** | The bridge's `sensor.hookii_<SERIAL>_battery` entity. The dropdown auto-filters to `device_class: battery` sensors. |
+| **Charge current sensor** | The bridge's `sensor.hookii_<SERIAL>_charge_a` entity. The dropdown auto-filters to `device_class: current` sensors. |
+| **Error binary sensor** | The bridge's `binary_sensor.hookii_<SERIAL>_error` entity (the `notice` attribute carries the `errCode` field this blueprint reads). |
+| **Battery threshold** | Path B only fires when battery is below this. Default 20 % - safe against a healthy 90-95 % top-up plateau, low enough to catch failed dockings before the mower runs flat. |
+| **Notification service** *(optional)* | E.g. `notify.mobile_app_yourphone`. Leave empty to run silently. |
+
+One automation instance per mower - if you have three Neomows, create three automations from the same blueprint with different inputs.
+
 ## How it works under the hood
 
 In May 2026 Hookii migrated their cloud from a passive-subscribe MQTT bus to a JWT-gated heartbeat protocol on `iot.beta.hookii.com`. The old "just subscribe to `hookii/details/device/<serial>`" trick stopped working overnight, and the official Hookii app became the only client that could see the new protocol.

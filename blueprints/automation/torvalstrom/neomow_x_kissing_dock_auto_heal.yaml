@@ -1,0 +1,204 @@
+blueprint:
+  name: "Neomow X - Auto-heal failed docking (kissing dock + alarm 514/515)"
+  description: |
+    Self-healing redock + alarm recovery for **Hookii Neomow X** mowers via the
+    [Hookii Bridge add-on](https://github.com/torvalstrom/hookii-bridge-ha-addon).
+
+    **Why this exists**
+
+    The Neomow X charging contacts are two flat square pads on the mower bottom
+    that quickly accumulate dust and oxidation in dry/hot weather. The dock side
+    has two spring-loaded "finger" contacts that oxidise over time. Combined,
+    this means the mower frequently fails its first dock attempt and either
+    sits with `chargeCurrent` flapping around 0 A (kissing the dock but not
+    drawing power) or throws docking alarm `514` / `515`.
+
+    The earlier Neomow firmware had a built-in self-heal that re-docked
+    automatically until contact succeeded. Hookii removed that behaviour in a
+    later firmware revision even though it worked well, and the symptom is now
+    one of the most common owner complaints.
+
+    **What this blueprint does**
+
+    Two recovery paths against the bridge's MQTT command channel:
+
+    - **Path A - explicit alarm:** when the mower posts `errCode` `514` or
+      `515` and stays in error for 60 s, publish to
+      `hookii/cmd/<SERIAL>/recover_alarm` (clears the alarm state machine -
+      same as sliding "OK to resolve" in the Hookii mobile app).
+
+    - **Path B - kissing dock:** when battery is below the threshold AND
+      `chargeCurrent` has been flapping inside the [-1, 1] A band for 60 s
+      (mower is on the dock but not drawing current), publish to
+      `hookii/cmd/<SERIAL>/recharge`. The bridge translates that into the
+      same `start/stop/job` cloud call the mobile app's "Recharge" button
+      uses, so the mower physically undocks and redocks.
+
+    A 2-minute `time_pattern` safety net re-evaluates conditions, so if the
+    first redock attempt also failed (which is common - the contact problem
+    can take 2-3 redocks to clear), the automation fires again. This matches
+    the manual workflow most owners already do: tap Recharge, wait 2 minutes,
+    tap again if needed.
+
+    **Prerequisites**
+
+    1. Hookii Bridge add-on installed and publishing MQTT Discovery entities
+       for the mower you want to heal.
+    2. A push notification service (Home Assistant Companion app, ntfy,
+       Telegram, etc.) - optional, blueprint works without it too.
+
+    **Tested on:** Neomow X Pro. Should work on any Hookii Neomow X variant
+    that runs the BETA firmware the bridge requires.
+  domain: automation
+  source_url: https://github.com/torvalstrom/hookii-bridge-ha-addon/blob/main/blueprints/automation/torvalstrom/neomow_x_kissing_dock_auto_heal.yaml
+  input:
+    serial_number:
+      name: "Mower serial number"
+      description: >-
+        The serial number printed under the mower (and shown in the Hookii app
+        under Device Info). Used to build the MQTT command topic
+        `hookii/cmd/<SERIAL>/...`.
+      selector:
+        text:
+    battery_sensor:
+      name: "Battery sensor"
+      description: >-
+        The bridge's battery percentage sensor for this mower. The bridge
+        auto-publishes it as `sensor.hookii_<SERIAL>_battery`.
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    charge_current_sensor:
+      name: "Charge current sensor"
+      description: >-
+        The bridge's charge-current sensor for this mower. The bridge
+        auto-publishes it as `sensor.hookii_<SERIAL>_charge_a`. Positive
+        when charging, negative when discharging, around 0 A when the mower
+        is kissing the dock without making electrical contact.
+      selector:
+        entity:
+          domain: sensor
+          device_class: current
+    error_binary_sensor:
+      name: "Error binary sensor"
+      description: >-
+        The bridge's error binary sensor for this mower. State `on` when the
+        cloud reports a non-recoverable error code (514, 515, others). The
+        `notice` attribute carries the `errCode` field.
+      selector:
+        entity:
+          domain: binary_sensor
+    battery_threshold:
+      name: "Battery threshold for kissing-dock path"
+      description: >-
+        Path B (kissing dock) only fires when battery is below this percentage
+        AND the charge current is flapping near 0 A. 20% is a safe default
+        that catches docking failures before the mower runs flat without
+        triggering on a healthy 90%-95% top-up plateau.
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 50
+          unit_of_measurement: "%"
+          mode: slider
+          step: 1
+    notify_service:
+      name: "Notification service (optional)"
+      description: >-
+        Service to call when the auto-heal fires (e.g.
+        `notify.mobile_app_yourphone`, `notify.ntfy_mowers`). Leave empty to
+        run silently. The notification includes which recovery path fired
+        and the current battery / charge-current readings.
+      default: ""
+      selector:
+        text:
+
+mode: single
+
+trigger:
+  - platform: state
+    entity_id: !input error_binary_sensor
+    to: "on"
+    for:
+      seconds: 60
+    id: error_trigger
+  - platform: numeric_state
+    entity_id: !input charge_current_sensor
+    above: -1
+    below: 1
+    for:
+      seconds: 60
+    id: charge_flap_trigger
+  - platform: time_pattern
+    minutes: "/2"
+    id: safety_net
+
+variables:
+  serial_number: !input serial_number
+  battery_sensor: !input battery_sensor
+  charge_current_sensor: !input charge_current_sensor
+  error_binary_sensor: !input error_binary_sensor
+  battery_threshold: !input battery_threshold
+  notify_service: !input notify_service
+  auto_heal_codes: ["514", "515"]
+
+condition:
+  - condition: or
+    conditions:
+      - condition: and
+        conditions:
+          - condition: state
+            entity_id: !input error_binary_sensor
+            state: "on"
+          - condition: template
+            value_template: >-
+              {% set ec = (state_attr(error_binary_sensor, 'notice') or {}).get('errCode') %}
+              {{ ec in auto_heal_codes }}
+      - condition: and
+        conditions:
+          - condition: numeric_state
+            entity_id: !input battery_sensor
+            below: !input battery_threshold
+          - condition: template
+            value_template: >-
+              {% set c = states(charge_current_sensor) | float(0) %}
+              {{ -1 < c < 1 }}
+
+action:
+  - variables:
+      ec: >-
+        {{ (state_attr(error_binary_sensor, 'notice') or {}).get('errCode') }}
+      cmd: >-
+        {%- if ec in auto_heal_codes -%}
+        recover_alarm
+        {%- else -%}
+        recharge
+        {%- endif -%}
+      cmd_topic: "hookii/cmd/{{ serial_number }}/{{ cmd }}"
+      battery_now: "{{ states(battery_sensor) }}"
+      charge_now: "{{ states(charge_current_sensor) }}"
+  - action: mqtt.publish
+    data:
+      topic: "{{ cmd_topic }}"
+      payload: "{}"
+      qos: 0
+      retain: false
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_service != '' }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: "Neomow {{ serial_number }} auto-healed"
+              message: >-
+                {%- if ec in auto_heal_codes -%}
+                Cleared alarm via recover_alarm at {{ now().strftime('%H:%M') }}
+                (errCode {{ ec }}).
+                {%- else -%}
+                Recharge cmd issued at {{ now().strftime('%H:%M') }}
+                (battery {{ battery_now }}% +
+                charge_current {{ charge_now }} A - kissing dock).
+                {%- endif %}
