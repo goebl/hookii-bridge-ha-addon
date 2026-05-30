@@ -1222,9 +1222,42 @@ def main() -> int:
             LOG.exception("error dispatching local command on %s", m.topic)
 
     local.on_message = _on_local_cmd
-    local.subscribe("hookii/cmd/+/+", qos=1)
-    LOG.info("local cmd subscriber active on hookii/cmd/+/+ for %d serial(s)",
-             len(account_by_serial))
+
+    # Wire on_connect to re-subscribe EVERY time the local client (re)connects.
+    # Without this, the MQTT subscription is lost across broker hiccups
+    # (broker restart, HA restart that bounces Mosquitto, network blip) and
+    # the bridge starts silently dropping button presses without any log
+    # signal that something is wrong - we observed this 2026-05-30 after
+    # back-to-back HA restarts during a v1.2.1 deploy.
+    def _on_local_connect(_c, _u, _flags, reason_code, _props=None) -> None:
+        try:
+            rc = int(reason_code)
+        except Exception:
+            rc = reason_code
+        if rc == 0:
+            local.subscribe("hookii/cmd/+/+", qos=1)
+            LOG.info("local broker (re)connected (rc=%s); re-subscribed hookii/cmd/+/+ for %d serial(s)",
+                     rc, len(account_by_serial))
+        else:
+            LOG.warning("local broker connect refused (rc=%s); paho will retry", rc)
+
+    def _on_local_disconnect(_c, _u, _flags, reason_code, _props=None) -> None:
+        try:
+            rc = int(reason_code)
+        except Exception:
+            rc = reason_code
+        if rc != 0:
+            LOG.warning("local broker disconnected (rc=%s); paho will reconnect + re-subscribe via on_connect", rc)
+
+    local.on_connect = _on_local_connect
+    local.on_disconnect = _on_local_disconnect
+
+    # Initial subscribe (in case we were already connected before wiring
+    # the callback). on_connect handles every subsequent reconnect.
+    if local.is_connected():
+        local.subscribe("hookii/cmd/+/+", qos=1)
+        LOG.info("local cmd subscriber active on hookii/cmd/+/+ for %d serial(s)",
+                 len(account_by_serial))
 
     LOG.info("bridge running with %d cloud client(s); ctrl-c to exit", len(clients))
 

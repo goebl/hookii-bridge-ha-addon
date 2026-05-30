@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.3 (2026-05-30)
+
+**Local MQTT cmd subscriber re-subscribes on every (re)connect.** Previously the bridge called `local.subscribe("hookii/cmd/+/+")` once at startup, but MQTT subscriptions live on the broker side and are lost whenever the broker (or the bridge's MQTT TCP connection) goes down even momentarily. After a broker restart, network blip or HA restart that bounces Mosquitto, the bridge stayed connected (paho-mqtt's `loop_start` auto-reconnects) but no longer received any button-press publishes - and there was nothing in the log to indicate why. Now wires `on_connect` to re-subscribe + `on_disconnect` to log the reason code; symptoms become visible AND self-healing.
+
 ## 1.2.2 (2026-05-30)
 
 **`hookii/snapshot_meta/<serial>` is now ALSO published on declined captures**, with `{"status": "declined", "taken_at": "<ISO>", "reason": "..."}`. The successful payload now also includes the explicit `"status": "ok"` field so consumers can branch on `status` directly instead of inferring success from a missing field. This lets downstream HA dashboards show a friendly "robot unable to capture in current state" message when the cloud declines (deep sleep, charging-without-camera-active, etc.) - users no longer wonder whether the button worked at all when nothing visible happens. The JPG payload on `hookii/snapshot/<serial>` is unchanged. The legacy `hookii/result/<serial>/error` publish is also preserved for backwards compatibility.
