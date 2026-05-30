@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.7 (2026-05-30)
+
+**Fix: cut/transit overlay now also picks up `rotate_deg`.** v1.0.6 rotated the boundary polygons, the live trail and the robot marker but the cut/transit polyline overlay was re-extracted via a fresh `extract_path_points(s)` call that bypassed the rotation, so the rotated dashboard map looked correct EXCEPT the bright cut swath which still drew in the un-rotated frame, layered on top of the rotated boundary at an obvious angle. v1.0.7 reuses the already-rotated point list both for the bounding box AND for the cut/transit segment classifier.
+
 ## 1.0.6 (2026-05-30)
 
 **Per-deployment map rotation.** The Hookii cloud delivers points in the mower's own local frame which has no fixed relation to compass north; in practice the in-app projection and the SVG sometimes look 90 degrees apart because the app is doing its own orientation. New `rotate_deg` config option (default 0 = identity) applies a counter-clockwise rotation to every point before bounding-box computation and SVG drawing - boundary, exclusion zones, path cut/transit segments, live trail, robot circle and heading arrow all rotate together. Typical values: 0, 90, 180, 270. Set whatever offset gets your SVG aligned with your in-app view. Also bumped run.sh's Supervisor probe to check `SUPERVISOR_TOKEN` env var directly (the same fix shipped in hookii-bridge v1.2.5) - cleaner detection of "am I hosted by HA Supervisor?".

@@ -706,7 +706,11 @@ def render_svg(label: str) -> str:
     except Exception:
         pass
 
-    path_points = extract_path_points(s)
+    # Reuse the rotated path computed above for bounds - re-calling
+    # extract_path_points() here would drop the ROTATE_DEG transform and
+    # render the cut/transit overlay in the un-rotated frame on top of a
+    # rotated boundary (the v1.0.6 first-attempt bug).
+    path_points = path_points_for_bounds
     if path_points:
         cut_segments: list[list[tuple]] = []
         transit_segments: list[list[tuple]] = []
