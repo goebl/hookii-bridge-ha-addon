@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 (2026-05-30)
+
+**Snapshot metadata topic for freshness-aware HA cards.** A successful camera capture now also publishes a small retained JSON payload to `hookii/snapshot_meta/<serial>` with `{"taken_at": "<ISO timestamp>", "size": <jpg-byte-count>}`. This lets HA template sensors evaluate "snapshot is fresh within the last N seconds" so dashboards can wrap the `picture-entity` card in a `conditional` card that only shows the image while it's recent - tackles the "image card takes too much space" complaint without losing the snapshot-on-demand capability. The JPG payload on `hookii/snapshot/<serial>` is unchanged.
+
 ## 1.2.0 (2026-05-30)
 
 **Two new control commands, both reverse-engineered from a 2026-05-30 PCAP of the official Hookii Android app handling a docking-failure 515 incident.**

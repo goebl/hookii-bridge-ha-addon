@@ -35,7 +35,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 import requests
@@ -1019,15 +1019,25 @@ class AccountClient:
                 # On-demand camera snapshot. The JPG bytes are published
                 # retained to hookii/snapshot/<serial> so the auto-discovered
                 # MQTT camera entity displays the latest image until the
-                # next snapshot replaces it.
+                # next snapshot replaces it. We ALSO publish a small metadata
+                # payload to hookii/snapshot_meta/<serial> retained with the
+                # ISO timestamp - so downstream HA template sensors can
+                # evaluate "snapshot is fresh within last N seconds" and
+                # conditionally show/hide the picture-entity card.
                 jpg = cmd_camera_snapshot(self.cfg, self.acct, serial, model)
                 if jpg:
                     self.local.publish(
                         f"hookii/snapshot/{serial}",
                         jpg, qos=1, retain=True,
                     )
-                    LOG.info("[%s] snapshot published: %d bytes",
-                             self.acct.label, len(jpg))
+                    taken_at = datetime.now(timezone.utc).isoformat()
+                    self.local.publish(
+                        f"hookii/snapshot_meta/{serial}",
+                        json.dumps({"taken_at": taken_at, "size": len(jpg)}),
+                        qos=1, retain=True,
+                    )
+                    LOG.info("[%s] snapshot published: %d bytes at %s",
+                             self.acct.label, len(jpg), taken_at)
                 else:
                     self.local.publish(
                         f"hookii/result/{serial}/error",
