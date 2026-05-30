@@ -69,6 +69,24 @@ PERSIST_DIR.mkdir(parents=True, exist_ok=True)
 WATCHDOG_IDLE_SECONDS = int(os.environ.get("WATCHDOG_IDLE_SECONDS", "300"))
 _last_mqtt_message_at = time.monotonic()
 
+# Counter-clockwise rotation in degrees applied to every (x, y) before the
+# SVG bounding box is computed and the path is drawn. The Hookii cloud
+# delivers points in the mower's own local frame which has no fixed
+# relation to compass north; in practice the app and the SVG sometimes look
+# 90 deg apart because the in-app projection is doing its own orientation.
+# Set ROTATE_DEG to the offset that makes the SVG match your in-app view
+# (typical values: 0, 90, 180, 270). Defaults to 0 = identity.
+ROTATE_DEG = float(os.environ.get("ROTATE_DEG", "0"))
+_ROT_RAD = math.radians(ROTATE_DEG)
+_ROT_COS = math.cos(_ROT_RAD)
+_ROT_SIN = math.sin(_ROT_RAD)
+
+
+def _rotate_xy(x: float, y: float) -> tuple[float, float]:
+    if ROTATE_DEG == 0:
+        return (x, y)
+    return (x * _ROT_COS - y * _ROT_SIN, x * _ROT_SIN + y * _ROT_COS)
+
 # Default cutting width in cm for cut-path stroke rendering. The Neomow X Pro
 # is ~23cm; the bridge may republish a more precise value via REGION_TASK
 # payloads (mowingWidth field) which is then picked up at render time.
@@ -591,9 +609,18 @@ def render_svg(label: str) -> str:
         )
 
     boundary = extract_boundary(s)
-    boundary_mowing = boundary["mowing"]
-    boundary_exclusion = boundary["exclusion"]
-    path_points_for_bounds = extract_path_points(s)
+    # Apply the global ROTATE_DEG transform to every input point BEFORE the
+    # bounding box is computed and BEFORE to_svg() projects to screen coords,
+    # so the rotated content keeps the same translucent fill / cut overlay /
+    # robot position layered the same way they always did. Rotation is a
+    # rigid 2D transform; the relative geometry between path, boundary,
+    # exclusion zones and robot position is preserved.
+    boundary_mowing = [[_rotate_xy(x, y) for (x, y) in poly]
+                       for poly in boundary["mowing"]]
+    boundary_exclusion = [[_rotate_xy(x, y) for (x, y) in poly]
+                          for poly in boundary["exclusion"]]
+    _raw_path = extract_path_points(s)
+    path_points_for_bounds = [(*_rotate_xy(p[0], p[1]), p[2]) for p in _raw_path]
     bound_pts: list = []
     if path_points_for_bounds:
         bound_pts = [(p[0], p[1]) for p in path_points_for_bounds]
@@ -601,7 +628,8 @@ def render_svg(label: str) -> str:
         # Flatten all mowing polygons into one bounding sample
         for poly in boundary_mowing:
             bound_pts.extend(poly)
-    bound_pts.append((s["robot_x"], s["robot_y"]))
+    robot_x_r, robot_y_r = _rotate_xy(s["robot_x"], s["robot_y"])
+    bound_pts.append((robot_x_r, robot_y_r))
 
     if len(bound_pts) > 1:
         min_x = min(p[0] for p in bound_pts)
@@ -725,15 +753,18 @@ def render_svg(label: str) -> str:
             )
 
     if len(s["trail"]) > 1:
+        # Trail also rotates through the global ROTATE_DEG transform so the
+        # rendered path stays aligned with the boundary and current robot.
+        rotated_trail = [_rotate_xy(x, y) for x, y, _ in s["trail"]]
         pts = " ".join(
-            f"{to_svg(x, y)[0]:.0f},{to_svg(x, y)[1]:.0f}" for x, y, _ in s["trail"]
+            f"{to_svg(x, y)[0]:.0f},{to_svg(x, y)[1]:.0f}" for x, y in rotated_trail
         )
         svg.append(
             f'<polyline points="{pts}" fill="none" stroke="{color}" '
             f'stroke-width="{px*2:.1f}" opacity="0.7"/>'
         )
 
-    rx, ry = to_svg(s["robot_x"], s["robot_y"])
+    rx, ry = to_svg(robot_x_r, robot_y_r)
     r = px * 10
     svg.append(
         f'<circle cx="{rx:.0f}" cy="{ry:.0f}" r="{r:.0f}" fill="{color}" '
@@ -741,7 +772,9 @@ def render_svg(label: str) -> str:
     )
     if s["heading"] is not None:
         try:
-            angle_rad = math.radians(float(s["heading"]))
+            # The mower's reported heading is in its own local frame, so the
+            # arrow gets the same ROTATE_DEG offset as the geometry.
+            angle_rad = math.radians(float(s["heading"]) + ROTATE_DEG)
             ahx = math.sin(angle_rad) * px * 18
             ahy = -math.cos(angle_rad) * px * 18
             svg.append(

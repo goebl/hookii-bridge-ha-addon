@@ -1,5 +1,5 @@
 name: Hookii Mower Map
-version: "1.0.5"
+version: "1.0.6"
 slug: hookii_mower_map
 description: >-
   Live SVG yard visualizer for Hookii Neomow robot mowers. Subscribes to the
@@ -42,6 +42,7 @@ options:
   topic_prefix: "hookii/details/device"
   trail_max: 2000
   log_level: "INFO"
+  rotate_deg: 0
 schema:
   mowers: str
   local_mqtt_host: str
@@ -51,3 +52,4 @@ schema:
   topic_prefix: str
   trail_max: int(100,10000)
   log_level: list(DEBUG|INFO|WARNING|ERROR)
+  rotate_deg: int(-360,360)

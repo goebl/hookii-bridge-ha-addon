@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.6 (2026-05-30)
+
+**Per-deployment map rotation.** The Hookii cloud delivers points in the mower's own local frame which has no fixed relation to compass north; in practice the in-app projection and the SVG sometimes look 90 degrees apart because the app is doing its own orientation. New `rotate_deg` config option (default 0 = identity) applies a counter-clockwise rotation to every point before bounding-box computation and SVG drawing - boundary, exclusion zones, path cut/transit segments, live trail, robot circle and heading arrow all rotate together. Typical values: 0, 90, 180, 270. Set whatever offset gets your SVG aligned with your in-app view. Also bumped run.sh's Supervisor probe to check `SUPERVISOR_TOKEN` env var directly (the same fix shipped in hookii-bridge v1.2.5) - cleaner detection of "am I hosted by HA Supervisor?".
+
 ## 1.0.5 (2026-05-30)
 
 **Idle-watchdog: force-exit when the MQTT stream goes silent.** Observed today on a real broker hiccup: the bridge's EMQX bounced, paho's `loop_forever(retry_first_connection=True)` re-entered its TCP retry path but never produced another `on_message` callback for 4 hours afterwards. The SVG endpoint kept serving 200's from the in-memory cache, the dashboard looked alive, but every frame was the last good frame from before the disconnect - users saw the map frozen. A daemon thread now tracks the wall-clock of the most recent `on_message` callback and force-exits via `os._exit(1)` after `WATCHDOG_IDLE_SECONDS` (default 300) of silence. The supervisor (k3s, Docker, HA Supervisor) respawns us with a fresh paho client. Same recover-by-restart pattern shipped in `hookii-bridge` v1.2.4 - both addons now share the same robustness floor.
