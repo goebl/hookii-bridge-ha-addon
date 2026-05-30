@@ -55,6 +55,20 @@ TRAIL_MAX = int(os.environ.get("TRAIL_MAX", "2000"))
 PERSIST_DIR = Path(os.environ.get("PERSIST_DIR", "/data"))
 PERSIST_DIR.mkdir(parents=True, exist_ok=True)
 
+# Watchdog: force-exit the process if NO MQTT message arrives for this many
+# seconds. Recover-by-restart: the supervisor (k3s, Docker, HA Supervisor)
+# spawns us again with a fresh paho client. Necessary because paho's
+# `loop_forever(retry_first_connection=True)` can wedge after certain broker
+# disconnects without ever returning (observed 2026-05-30 after the bridge's
+# EMQX bounced and this client never reconnected for 4+ hours).
+#
+# 300 s is generous: an actively-mowing mower publishes STATUS every 2-5 s,
+# an idle docked mower every 30-60 s, so 5 minutes of total silence across
+# all configured mowers is a strong "something is wrong" signal regardless
+# of the cause (broker dead, network split, stuck paho state).
+WATCHDOG_IDLE_SECONDS = int(os.environ.get("WATCHDOG_IDLE_SECONDS", "300"))
+_last_mqtt_message_at = time.monotonic()
+
 # Default cutting width in cm for cut-path stroke rendering. The Neomow X Pro
 # is ~23cm; the bridge may republish a more precise value via REGION_TASK
 # payloads (mowingWidth field) which is then picked up at render time.
@@ -281,6 +295,8 @@ def handle_status(s: dict, status: dict) -> None:
 
 
 def on_message(client: mqtt.Client, userdata, msg):
+    global _last_mqtt_message_at
+    _last_mqtt_message_at = time.monotonic()
     try:
         payload_raw = msg.payload.decode("utf-8", errors="replace")
         payload = json.loads(payload_raw)
@@ -356,6 +372,29 @@ def on_message(client: mqtt.Client, userdata, msg):
         # derived state and we'd rather a clean re-derive on restart than
         # a stale cached value.
         s["region_task"] = payload.get("data", {}).get("REGION_TASK", {})
+
+
+def mqtt_idle_watchdog() -> None:
+    """Force-exit the process when no MQTT message has arrived for
+    WATCHDOG_IDLE_SECONDS. Run as a daemon thread.
+
+    Recover-by-restart: the supervisor (k3s, Docker, HA Supervisor) respawns
+    us with a fresh paho client. Necessary because paho's
+    `loop_forever(retry_first_connection=True)` can wedge in a half-
+    connected state after certain broker disconnects, never returning AND
+    never reconnecting - the same pattern observed in the bridge.
+    """
+    while True:
+        time.sleep(30)
+        idle_for = time.monotonic() - _last_mqtt_message_at
+        if idle_for > WATCHDOG_IDLE_SECONDS:
+            print(
+                f"watchdog: no MQTT message for {idle_for:.0f}s "
+                f"(threshold {WATCHDOG_IDLE_SECONDS}s) - forcing process "
+                f"exit so the supervisor respawns with a fresh paho client",
+                flush=True,
+            )
+            os._exit(1)
 
 
 def mqtt_listener() -> None:
@@ -865,6 +904,7 @@ def get_all():
 
 load_persisted()
 threading.Thread(target=mqtt_listener, name="mqtt", daemon=True).start()
+threading.Thread(target=mqtt_idle_watchdog, name="mqtt-watchdog", daemon=True).start()
 print(
     f"hookii-mower-map ready: {len(state)} mower(s) configured: "
     f"{', '.join(state.keys())}",
