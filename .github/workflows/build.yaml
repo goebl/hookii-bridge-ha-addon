@@ -45,7 +45,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.addon }}
-        uses: home-assistant/builder@2025.11.0
+        # Pinned to 2025.03.0: it still supports --armv7 (32-bit Pi). 2025.11.0
+        # dropped armv7/armhf, which would silently strip 32-bit users who can
+        # currently install via the local build.
+        uses: home-assistant/builder@2025.03.0
         with:
           args: |
             --amd64 \
