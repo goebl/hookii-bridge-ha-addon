@@ -203,7 +203,15 @@ To check which install method you have: **Settings → About → Installation me
 
 If you run Home Assistant as a plain Docker container, in Kubernetes, or as the bare Core install, there's no Supervisor and therefore no Add-on Store. You run the bridge as a standalone Docker container next to your Home Assistant container instead. Same image, no Add-on Supervisor wrapper.
 
-The repo's root [`Dockerfile`](Dockerfile) is built for exactly this case: a plain `python:3.12-slim` image with the bridge as its entrypoint, configured entirely through environment variables instead of `options.json`.
+**The easiest option is to pull the prebuilt image** — the same multi-arch images published to GHCR for the Add-on Store, which also run standalone (the launcher auto-detects "no Supervisor" and reads its config from the environment variables below). No local build needed:
+
+| Your host architecture | Image to pull |
+|---|---|
+| x86-64 (most mini-PCs / NUCs / VMs) | `ghcr.io/torvalstrom/amd64-hookii-bridge:latest` |
+| 64-bit ARM (Raspberry Pi 4/5 on a 64-bit OS) | `ghcr.io/torvalstrom/aarch64-hookii-bridge:latest` |
+| 32-bit ARM (Raspberry Pi 2/3 on a 32-bit OS) | `ghcr.io/torvalstrom/armv7-hookii-bridge:latest` |
+
+Pick the row matching your host (`uname -m`: `x86_64`→amd64, `aarch64`/`arm64`→aarch64, `armv7l`→armv7). Pin to a specific release with `:1.2.7` instead of `:latest`. The examples below show this image; if you'd rather build from source, the repo's root [`Dockerfile`](Dockerfile) still works — replace the `image:` line with the commented-out `build:` line.
 
 ### 1. Add the bridge to your existing `docker-compose.yml`
 
@@ -215,7 +223,8 @@ Drop this service into the same compose file you already use for Home Assistant.
 ```yaml
 services:
   hookii-bridge:
-    build: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
+    image: ghcr.io/torvalstrom/amd64-hookii-bridge:latest   # ← pick your arch (amd64 / aarch64 / armv7)
+    # build: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main   # ← or build from source instead
     container_name: hookii-bridge
     restart: unless-stopped
     network_mode: host                    # ⚠️  Required so the bridge can reach
@@ -267,10 +276,10 @@ docker run -d --name hookii-bridge --restart unless-stopped \
   -e LOCAL_MQTT_PASS="..." \
   -e HEARTBEAT_SEC="1.5" \
   -e ENABLE_DISCOVERY="1" \
-  $(docker build -q https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main)
+  ghcr.io/torvalstrom/amd64-hookii-bridge:latest   # ← pick your arch (amd64 / aarch64 / armv7)
 ```
 
-Same pairing rule as the compose example: the label in `HOOKII_ACCOUNTS` (here `mower`) determines the `HOOKII_SERIALS_<LABEL>` variable name (here `HOOKII_SERIALS_MOWER`).
+Same pairing rule as the compose example: the label in `HOOKII_ACCOUNTS` (here `mower`) determines the `HOOKII_SERIALS_<LABEL>` variable name (here `HOOKII_SERIALS_MOWER`). (Prefer building from source? Replace the last line with `$(docker build -q https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main)`.)
 
 ### 3. Verify it's running
 
@@ -306,21 +315,19 @@ In Home Assistant, the bridge's mower entities (`lawn_mower.*`, the 5 command bu
 
 ### 5. Updating later
 
-There's no Add-on Store update banner on this install path — you rebuild the image yourself when you want a new version. Check the [CHANGELOG](hookii_bridge/CHANGELOG.md), then:
+There's no Add-on Store update banner on this install path — you pull the new image yourself when you want a new version. Check the [CHANGELOG](hookii_bridge/CHANGELOG.md), then:
 
 ```bash
-# Compose:
-docker compose build --no-cache --pull hookii-bridge && \
-  docker compose up -d hookii-bridge
+# Compose (using the prebuilt image):
+docker compose pull hookii-bridge && docker compose up -d hookii-bridge
 
-# Plain docker:
-docker build --no-cache --pull -t hookii-bridge:latest \
-  https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
+# Plain docker (using the prebuilt image):
+docker pull ghcr.io/torvalstrom/amd64-hookii-bridge:latest   # ← your arch
 docker stop hookii-bridge && docker rm hookii-bridge
-# ... then re-run the `docker run` from step 2 with `-d hookii-bridge:latest` as the image
+# ... then re-run the `docker run` from step 2
 ```
 
-Pin to a specific release by appending `#v1.1.6` instead of `#main` to the build URL.
+Pin to a specific release by using `:1.2.7` instead of `:latest` (and bump it when you want to move). If you build from source instead, swap the pull for `docker compose build --no-cache --pull hookii-bridge` (compose) or `docker build --no-cache --pull -t hookii-bridge:latest https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main` (plain docker), appending `#v1.2.7` to pin.
 
 ### 6. (Optional) Adding the Mower Map alongside the bridge
 
@@ -328,9 +335,10 @@ If you want the live SVG yard view too, add a second service to the same compose
 
 ```yaml
   hookii-mower-map:
-    build:
-      context: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
-      dockerfile: Dockerfile.map
+    image: ghcr.io/torvalstrom/amd64-hookii-mower-map:latest   # ← pick your arch (amd64 / aarch64 / armv7)
+    # build:                                                    # ← or build from source instead
+    #   context: https://github.com/torvalstrom/hookii-bridge-ha-addon.git#main
+    #   dockerfile: Dockerfile.map
     container_name: hookii-mower-map
     restart: unless-stopped
     network_mode: host
