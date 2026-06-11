@@ -37,6 +37,13 @@ blueprint:
       same `start/stop/job` cloud call the mobile app's "Recharge" button
       uses, so the mower physically undocks and redocks.
 
+    **Stale-data guard:** both paths are skipped while telemetry is stale.
+    When the Hookii cloud push stalls, `battery` and `charge_current` freeze
+    (often at `0 %` / `0 A`) - which looks identical to a low-battery kissing
+    dock and would otherwise trigger a bogus redock on a mower that is
+    actually out mowing. The automation only fires if the battery sensor
+    reported within `max_telemetry_age_minutes` (default 15) and reads > 0.
+
     A 2-minute `time_pattern` safety net re-evaluates conditions, so if the
     first redock attempt also failed (which is common - the contact problem
     can take 2-3 redocks to clear), the automation fires again. This matches
@@ -107,6 +114,28 @@ blueprint:
           unit_of_measurement: "%"
           mode: slider
           step: 1
+    max_telemetry_age_minutes:
+      name: "Max telemetry age (stale-data guard)"
+      description: >-
+        Both recovery paths are skipped when the bridge has not received a
+        fresh STATUS push for this many minutes. This stops the automation
+        acting on STALE readings: when the Hookii cloud push pipeline stalls
+        (or the bridge briefly loses its single-session slot to the mobile
+        app), `battery` freezes - often at `0 %` - and `charge_current`
+        freezes near `0 A`, which otherwise looks exactly like a low-battery
+        kissing dock and triggers a bogus Recharge/redock on a mower that may
+        actually be out mowing. Freshness is measured from the battery
+        sensor's `last_reported` (which bumps on EVERY push, even when the
+        value is unchanged), so a live-but-idle docked mower is not mistaken
+        for stale. 15 minutes comfortably exceeds the normal push cadence.
+      default: 15
+      selector:
+        number:
+          min: 3
+          max: 120
+          unit_of_measurement: "min"
+          mode: slider
+          step: 1
     notify_service:
       name: "Notification service (optional)"
       description: >-
@@ -144,10 +173,22 @@ variables:
   charge_current_sensor: !input charge_current_sensor
   error_binary_sensor: !input error_binary_sensor
   battery_threshold: !input battery_threshold
+  max_telemetry_age_minutes: !input max_telemetry_age_minutes
   notify_service: !input notify_service
   auto_heal_codes: ["514", "515", "116"]
 
 condition:
+  # Stale-data guard: never act on frozen telemetry. last_reported bumps on
+  # every cloud push (even unchanged values), so a stale (no-push) sensor is
+  # detectable while a live idle mower is not falsely flagged. The battery>0
+  # check is belt-and-suspenders for the common "frozen at 0%" stale shape.
+  - condition: template
+    alias: "Telemetry fresh - skip on stale MQTT data"
+    value_template: >-
+      {% set b = states[battery_sensor] %}
+      {{ b is not none
+         and (now() - b.last_reported).total_seconds() < (max_telemetry_age_minutes | int * 60)
+         and (states(battery_sensor) | float(-1)) > 0 }}
   - condition: or
     conditions:
       - condition: and
