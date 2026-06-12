@@ -1,5 +1,10 @@
 # Neomow X Home Assistant Add-on
 
+> 🚀 **New to this? Start with the [simple step-by-step guide](GETTING_STARTED.md).**
+> It's a plain-language, 20-minute walkthrough from nothing to a working mower in
+> Home Assistant - no prior knowledge needed. The rest of this README is the full
+> reference once you're up and running.
+
 > ℹ️ **Works against BOTH the Hookii BETA cloud and the PRODUCTION cloud.**
 > Pick the backend with the `hookii_env` option (add-on) or the `HOOKII_ENV` env var (Container / k3s): `beta` → `iot.beta.hookii.com` (default), `prod` → `iot.hookii.com`. **BETA firmware `1.6.8.4-beta` or newer** unlocks the richest telemetry (granular sensors + firmware-upgrade awareness); mowers on **stable / production firmware** work for the core features (state, battery, command buttons, Discovery) with fewer sensors. The bridge handles both and degrades gracefully - it never fails just because a mower is on stable firmware. See [DOCS.md](hookii_bridge/DOCS.md) "Beta vs Production cloud" for the full tradeoff and how to choose.
 
