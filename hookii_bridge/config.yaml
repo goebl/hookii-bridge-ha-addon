@@ -1,17 +1,20 @@
 name: Hookii Bridge
-version: "1.2.8"
+version: "1.2.9"
 slug: hookii_bridge
 # Prebuilt multi-arch image published to GHCR by CI (.github/workflows/build.yaml).
 # With this key the Supervisor PULLS the image instead of building it locally on
 # the user's device, so updates are fast and don't fail on slow/ARM hardware.
 image: "ghcr.io/torvalstrom/{arch}-hookii-bridge"
 description: >-
-  REQUIRES Hookii BETA firmware 1.6.8.4-beta or newer. Reverse-engineered
-  cloud bridge for Hookii Neomow robot mowers (May 2026 BETA protocol).
-  Logs in, keeps the JWT heartbeat alive, normalises the payload, REST
-  command channel for start/pause/return/stop, publishes Home Assistant
-  MQTT Discovery configs so a lawn_mower entity + 5 buttons + telemetry
-  sensors appear in HA without any YAML.
+  Reverse-engineered cloud bridge for Hookii Neomow robot mowers. Works with
+  the BETA cloud (iot.beta.hookii.com, the protocol's reference backend) or the
+  PRODUCTION cloud (iot.hookii.com) via the hookii_env option. Logs in, keeps
+  the JWT heartbeat alive, normalises the payload, REST command channel for
+  start/pause/return/stop, publishes Home Assistant MQTT Discovery configs so a
+  lawn_mower entity + buttons + telemetry sensors appear in HA without any YAML.
+  Richest telemetry (robotStatus, firmware-upgrade state) needs BETA firmware
+  1.6.8.4-beta+; stable/prod firmware emits a sparser status that the bridge
+  still maps gracefully.
 url: https://github.com/torvalstrom/hookii-bridge-ha-addon
 arch:
   - amd64
@@ -36,6 +39,9 @@ options:
   hookii_agent: "Android/Xiaomi 25010PN30G 16/V1.1.0/189"
   enable_discovery: true
   discovery_prefix: "homeassistant"
+  hookii_env: "beta"
+  hookii_rest_host: ""
+  hookii_mqtt_host: ""
 schema:
   hookii_email: str
   hookii_password: password
@@ -49,3 +55,8 @@ schema:
   hookii_agent: str
   enable_discovery: bool
   discovery_prefix: str
+  # Server environment: beta (iot.beta.hookii.com) or prod (iot.hookii.com).
+  hookii_env: list(beta|prod)
+  # Optional explicit overrides (host:port). Leave blank to use the env preset.
+  hookii_rest_host: "str?"
+  hookii_mqtt_host: "str?"

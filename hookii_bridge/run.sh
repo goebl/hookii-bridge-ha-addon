@@ -30,6 +30,10 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ] && command -v bashio >/dev/null 2>&1; then
   HOOKII_AGENT=$(bashio::config 'hookii_agent')
   ENABLE_DISCOVERY=$(bashio::config 'enable_discovery')
   DISCOVERY_PREFIX=$(bashio::config 'discovery_prefix')
+  # Server environment (beta|prod) + optional explicit host overrides.
+  HOOKII_ENV=$(bashio::config 'hookii_env')
+  HOOKII_REST_HOST_OPT=$(bashio::config 'hookii_rest_host')
+  HOOKII_MQTT_HOST_OPT=$(bashio::config 'hookii_mqtt_host')
 
   if [ -z "${HOOKII_EMAIL}" ] || [ -z "${HOOKII_PASSWORD}" ]; then
     echo "FATAL: hookii_email and hookii_password are required - configure the add-on first." >&2
@@ -80,6 +84,19 @@ if [ -n "${HOOKII_AGENT:-}" ]; then
 fi
 export ENABLE_DISCOVERY="${ENABLE_DISCOVERY:-1}"
 export DISCOVERY_PREFIX="${DISCOVERY_PREFIX:-homeassistant}"
+
+# Hookii server environment: "beta" (default) or "prod". bridge.py maps this to
+# iot.beta.hookii.com vs iot.hookii.com. Explicit host overrides win if set
+# (empty add-on fields stay empty -> bridge.py uses the env preset). Standalone
+# k3s/docker users can just set HOOKII_ENV / HOOKII_REST_HOST / HOOKII_MQTT_HOST
+# directly in their Deployment env.
+export HOOKII_ENV="${HOOKII_ENV:-beta}"
+if [ -n "${HOOKII_REST_HOST_OPT:-}" ]; then
+  export HOOKII_REST_HOST="${HOOKII_REST_HOST_OPT}"
+fi
+if [ -n "${HOOKII_MQTT_HOST_OPT:-}" ]; then
+  export HOOKII_MQTT_HOST="${HOOKII_MQTT_HOST_OPT}"
+fi
 
 # Legacy local topic shape - existing HA template sensors, n8n flows and
 # Lovelace cards keep working unchanged across both deployment modes. NB

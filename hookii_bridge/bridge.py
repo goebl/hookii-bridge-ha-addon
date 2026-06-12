@@ -327,8 +327,19 @@ def parse_config() -> Config:
         # same defensive UX as md5_upper's auto-detection of pre-hashed pw.
         accounts.append(HookiiAccount(label=label.strip(), email=email.strip().lower(), password=password))
 
-    rest = os.environ.get("HOOKII_REST_HOST", "iot.beta.hookii.com:10443").split(":")
-    cloud = os.environ.get("HOOKII_MQTT_HOST", "iot.beta.hookii.com:8883").split(":")
+    # Server environment selector. HOOKII_ENV=prod points the bridge at the
+    # PRODUCTION Hookii cloud (iot.hookii.com); the default "beta" uses the
+    # beta backend (iot.beta.hookii.com) the protocol was reverse-engineered
+    # against. Explicit HOOKII_REST_HOST / HOOKII_MQTT_HOST still override
+    # either preset, for power users or if a port ever differs. Note: mowers on
+    # STABLE (prod) firmware emit the sparser "Shape A" STATUS (workingMode but
+    # often no robotStatus) - the bridge already handles that and degrades
+    # gracefully.
+    env = os.environ.get("HOOKII_ENV", "beta").strip().lower()
+    default_host = "iot.hookii.com" if env == "prod" else "iot.beta.hookii.com"
+    rest = os.environ.get("HOOKII_REST_HOST", f"{default_host}:10443").split(":")
+    cloud = os.environ.get("HOOKII_MQTT_HOST", f"{default_host}:8883").split(":")
+    LOG.info("hookii server env=%s -> rest=%s mqtt=%s", env, ":".join(rest), ":".join(cloud))
 
     return Config(
         accounts=accounts,
