@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.0-beta1 (2026-06-12)
+
+**The Mower Map is now built into the Bridge - one add-on instead of two.** The live SVG yard view (formerly the separate "Hookii Mower Map" add-on) now runs inside this add-on and appears automatically as a **Mower Map** panel in the Home Assistant sidebar. Big simplification for setup:
+
+- **No second add-on to install**, and **no re-typing** your MQTT details or mower serials - the map reuses everything you already configured here.
+- The map's mower list is built automatically from your `mower_serials`, so the old `mowers` field is gone.
+- Two optional display tweaks were added: `map_trail_max` and `map_rotate_deg`.
+
+The map is served over Home Assistant Ingress (the sidebar panel) - no host port needed. If you want direct host:port access, set the optional port in the Network section.
+
+**Migration from the old separate add-on:** uninstall the old "Hookii Mower Map" add-on after updating this one. If you embedded the map in a Lovelace iframe card, change the URL slug from `hookii_mower_map` to `hookii_bridge` (e.g. `/hassio/ingress/hookii_bridge/all`).
+
+> Beta note: this is a `-beta1` release for testing the merged image before it becomes the default. The bridge half is unchanged from 1.4.0; only the bundled map + launcher are new.
+
 ## 1.4.0 (2026-06-12)
 
 **Friendlier setup for non-technical users.** Added a `translations/en.yaml` so the add-on Configuration screen now shows a plain-language name and help text for every field. The fields people get stuck on are now self-explanatory right in the UI: the dedicated-account requirement is spelled out on the email field, the serial-number field tells you where to find the code, beta-vs-prod explains which to pick, and every power-user field is clearly marked "(advanced) - leave blank". No behaviour change - purely a Home Assistant UI clarity improvement.

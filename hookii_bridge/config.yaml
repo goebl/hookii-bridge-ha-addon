@@ -1,5 +1,5 @@
 name: Hookii Bridge
-version: "1.4.0"
+version: "1.5.0-beta1"
 slug: hookii_bridge
 # Prebuilt multi-arch image published to GHCR by CI (.github/workflows/build.yaml).
 # With this key the Supervisor PULLS the image instead of building it locally on
@@ -26,6 +26,20 @@ startup: services
 host_network: false
 hassio_api: false
 homeassistant_api: false
+# The live Mower Map (formerly a separate add-on) is now built in and served
+# over Home Assistant Ingress - it appears as a "Mower Map" panel in the
+# sidebar with no extra install. It reuses this add-on's MQTT settings and the
+# mower serials below, so there is nothing extra to configure.
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:map-outline
+panel_title: Mower Map
+# Direct host:port to the map is OFF by default (ingress is enough). Set a host
+# port only if you need to embed the map outside Home Assistant.
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: Direct web access to the Mower Map (optional - leave unset for ingress-only)
 options:
   hookii_email: ""
   hookii_password: ""
@@ -44,6 +58,8 @@ options:
   hookii_mqtt_host: ""
   hookii_mqtt_user: ""
   hookii_mqtt_pass: ""
+  map_trail_max: 2000
+  map_rotate_deg: 0
 schema:
   hookii_email: str
   hookii_password: password
@@ -67,3 +83,6 @@ schema:
   # a DIFFERENT shared static pair - set both here when running hookii_env: prod.
   hookii_mqtt_user: "str?"
   hookii_mqtt_pass: "password?"
+  # Built-in Mower Map display options.
+  map_trail_max: int(100,10000)
+  map_rotate_deg: int(-360,360)

@@ -77,3 +77,13 @@ configuration:
   log_level:
     name: Log detail
     description: Leave at INFO. Use DEBUG only when troubleshooting.
+  map_trail_max:
+    name: Map trail length
+    description: >-
+      For the built-in Mower Map: how many recent positions to keep in the
+      moving trail line behind the mower. The default is fine for most yards.
+  map_rotate_deg:
+    name: Map rotation
+    description: >-
+      For the built-in Mower Map: rotate the whole map by this many degrees so it
+      lines up with how you picture your yard. Leave at 0 to start.

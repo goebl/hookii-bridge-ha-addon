@@ -37,6 +37,9 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ] && command -v bashio >/dev/null 2>&1; then
   # Cloud MQTT broker creds (prod broker needs a different static pair than beta).
   HOOKII_MQTT_USER_OPT=$(bashio::config 'hookii_mqtt_user')
   HOOKII_MQTT_PASS_OPT=$(bashio::config 'hookii_mqtt_pass')
+  # Built-in Mower Map display options.
+  MAP_TRAIL_MAX=$(bashio::config 'map_trail_max')
+  MAP_ROTATE_DEG=$(bashio::config 'map_rotate_deg')
 
   if [ -z "${HOOKII_EMAIL}" ] || [ -z "${HOOKII_PASSWORD}" ]; then
     echo "FATAL: hookii_email and hookii_password are required - configure the add-on first." >&2
@@ -123,5 +126,49 @@ if [ -z "${CMD_TOPIC_FMT:-}" ]; then
   export CMD_TOPIC_FMT="hookii/cmd/{serial}/{action}"
 fi
 
-echo "Starting Hookii Bridge: broker=${LOCAL_MQTT_HOST}:${LOCAL_MQTT_PORT} accounts=$(echo "$HOOKII_ACCOUNTS" | awk -F: '{print $1; for(i=4;i<=NF;i+=3) print $i}' | tr '\n' ',')"
-exec python3 /opt/bridge.py
+# --- Built-in Mower Map env -------------------------------------------------
+# Build the Mower Map's mower list from the serials configured above so there is
+# nothing extra to type. The label (used only in the map URL) is the serial in
+# lower-case; the map's /all grid shows every mower together regardless. Only
+# done in add-on mode (MOWER_SERIALS set); standalone users can pass MOWERS
+# directly. If MOWERS ends up empty we simply run the bridge without the map.
+if [ -n "${MOWER_SERIALS:-}" ] && [ -z "${MOWERS:-}" ]; then
+  _map_mowers=""
+  _old_ifs="$IFS"; IFS=','
+  for _s in ${MOWER_SERIALS}; do
+    _s=$(echo "${_s}" | tr -d '[:space:]')
+    if [ -z "${_s}" ]; then continue; fi
+    _label=$(echo "${_s}" | tr '[:upper:]' '[:lower:]')
+    if [ -z "${_map_mowers}" ]; then _map_mowers="${_label}:${_s}"; else _map_mowers="${_map_mowers};${_label}:${_s}"; fi
+  done
+  IFS="${_old_ifs}"
+  export MOWERS="${_map_mowers}"
+fi
+export TRAIL_MAX="${MAP_TRAIL_MAX:-2000}"
+export ROTATE_DEG="${MAP_ROTATE_DEG:-0}"
+export PERSIST_DIR="${PERSIST_DIR:-/data}"
+
+# --- Launch -----------------------------------------------------------------
+if [ -n "${MOWERS:-}" ]; then
+  echo "Starting Hookii Bridge + Mower Map: broker=${LOCAL_MQTT_HOST}:${LOCAL_MQTT_PORT} mowers=${MOWERS}"
+  # The BRIDGE is the critical process; the Mower Map is secondary. We start the
+  # map alongside the bridge but NEVER let a map failure take the bridge down -
+  # if the map crashes we just log it and the bridge keeps running (sensors +
+  # controls keep working), and the map returns next time the add-on restarts.
+  # This is what makes bundling the map safe: worst case is "bridge works, no
+  # map", which is no worse than running the bridge alone.
+  (
+    uvicorn --host 0.0.0.0 --port 8000 --app-dir /opt map_server:app
+    echo "Mower Map exited (rc=$?) - the bridge keeps running without it." >&2
+  ) &
+  _map_pid=$!
+  trap 'kill "${_map_pid}" 2>/dev/null' EXIT TERM INT
+  set +e
+  python3 /opt/bridge.py
+  _rc=$?
+  echo "Bridge exited (rc=${_rc}) - shutting down." >&2
+  exit "${_rc}"
+else
+  echo "Starting Hookii Bridge (no mowers for the map): broker=${LOCAL_MQTT_HOST}:${LOCAL_MQTT_PORT}"
+  exec python3 /opt/bridge.py
+fi
