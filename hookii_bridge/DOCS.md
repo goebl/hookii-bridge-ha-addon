@@ -1,12 +1,13 @@
 # Hookii Bridge
 
-> ⚠️ **Requires Hookii BETA firmware `1.6.8.4-beta` or newer on every mower this add-on talks to.**
+> ℹ️ **Works against BOTH the Hookii BETA cloud and the PRODUCTION cloud - pick with the `hookii_env` option.**
 >
-> The new cloud protocol this add-on speaks lives on `iot.beta.hookii.com`, which is **only live on the Hookii BETA firmware channel**. Mowers on the stable channel won't push STATUS through this bridge at all - the REST login will succeed but no STATUS topics will ever arrive.
+> The add-on can talk to either backend:
 >
-> **Before you install:** open the Hookii mobile app → your mower → settings → firmware → switch to the Beta channel, and let it update to `1.6.8.4-beta` or newer. Do this for every mower you want bridged. Joining the Beta channel is a Hookii setting, not a Home Assistant one; this add-on cannot do it for you.
+> - `hookii_env: beta` (default) → `iot.beta.hookii.com`, the protocol's reference backend. Mowers on **Hookii BETA firmware `1.6.8.4-beta` or newer** push the richest telemetry here: the fine-grained `robotStatus` state machine, the granular per-system sensors, and firmware-upgrade awareness.
+> - `hookii_env: prod` → `iot.hookii.com`, the production cloud. Use this if your mowers run **stable (production) firmware** and you log in with your normal Hookii production account. Stable firmware emits a sparser STATUS, so you still get the core `lawn_mower` state (docked / mowing / returning), battery, the command buttons and Discovery - but NOT the granular sensors or the firmware-upgrade indicator.
 >
-> If you're not comfortable running BETA firmware on your mower, this add-on is **not** for you yet - wait until Hookii promotes the new protocol to the stable channel.
+> Short version: choose `prod` if your mowers are on stable firmware / a production account; choose `beta` for the full feature set (and switch each mower to the Beta channel in the Hookii mobile app first). See the "Beta vs Production cloud" section below for the full tradeoff. The bridge handles both shapes and degrades gracefully - it never fails just because a mower is on stable firmware.
 
 > 🚨 **Use a DEDICATED Hookii account for the bridge - DO NOT reuse your primary account.**
 >
@@ -34,7 +35,7 @@ After install you get, per mower, in HA:
 
 You need to have these set up in Home Assistant already:
 
-1. **Your mower is on Hookii BETA firmware `1.6.8.4-beta` or newer** (see banner above). Verify in the Hookii mobile app under each mower → Settings → Firmware. If you don't see a `…-beta` suffix on the version, you're still on stable and the add-on cannot work.
+1. **A Hookii cloud to connect to - beta or production.** The add-on works with both (set `hookii_env`; see the banner and the "Beta vs Production cloud" section). For the **full** feature set (granular sensors + firmware-upgrade awareness) your mower needs Hookii BETA firmware `1.6.8.4-beta` or newer and `hookii_env: beta`; verify the `…-beta` suffix in the Hookii mobile app under each mower → Settings → Firmware. On **stable** firmware, leave `hookii_env: prod` and you still get state, battery, the command buttons and Discovery - just fewer sensors.
 2. **A DEDICATED Hookii account for the bridge** (see the second banner above - this is the most-skipped step and the one that causes the "my mobile app keeps logging out" complaint). Create a second Hookii account with a different email, then from your primary account share every mower to the bridge account via the mobile app's Device Sharing menu. The add-on will use the bridge account's credentials below; your primary account stays signed in on your phone.
 3. **Mosquitto broker add-on** (Settings → Add-ons → Add-on Store → "Mosquitto broker" → Install + Start). The community version published by Home Assistant is fine.
 4. **MQTT integration** (Settings → Devices & Services → Add Integration → MQTT). Point it at your Mosquitto broker.
@@ -59,6 +60,21 @@ printf 'your_password_here' | md5sum | awk '{print toupper($1)}'
 …or paste into a trusted browser-side MD5 tool like <https://emn178.github.io/online-tools/md5.html> and uppercase the result.
 
 The two options produce the same login result; pick whichever you're more comfortable with.
+
+## Beta vs Production cloud
+
+The bridge can run against either of Hookii's two clouds, selected with the `hookii_env` option (add-on) or the `HOOKII_ENV` env var (Container / k3s / docker):
+
+| `hookii_env` | Server | Use it when | What you get |
+|---|---|---|---|
+| `beta` (default) | `iot.beta.hookii.com` (REST :10443, MQTT :8883) | Your mowers are on **BETA firmware `1.6.8.4-beta` or newer** and you log in with a beta account. | The **full** feature set: the fine-grained `robotStatus` state machine, all granular sensors, and firmware-upgrade awareness (the firmware-upgrading binary_sensor + auto-disable-during-OTA behaviour). |
+| `prod` | `iot.hookii.com` (REST :10443, MQTT :8883) | Your mowers are on **stable (production) firmware** and you use your normal production Hookii account. | The **core** feature set: the `lawn_mower` state (docked / mowing / returning, derived from `workingMode`), battery, the command buttons and Discovery. |
+
+**The honest tradeoff:** the rich STATUS fields (`robotStatus`, the fine-grained state machine, firmware-upgrade detection) are only emitted by BETA firmware `1.6.8.4-beta+`. Mowers on stable firmware send a **sparser** STATUS ("Shape A" - `workingMode` only, often no `robotStatus`). The bridge handles both shapes and degrades gracefully: on prod / stable firmware you keep the core lawn_mower state, battery, the command buttons and Discovery, but you do **not** get the granular sensors or the firmware-upgrade indicator. Nothing fails - you simply get fewer entities.
+
+So: pick `prod` if your mowers run stable firmware and you want to use your production Hookii account as-is; pick `beta` (and switch each mower to the Beta channel in the Hookii mobile app) for the complete sensor set.
+
+Two advanced options, `hookii_rest_host` and `hookii_mqtt_host` (each a `host:port`), let you override the endpoints that `hookii_env` selects. They are blank by default and only needed if a port ever differs from the presets - most users should leave them empty. For Container / k3s users the same overrides are the `HOOKII_REST_HOST` / `HOOKII_MQTT_HOST` env vars.
 
 ## Install
 
@@ -87,6 +103,9 @@ The two options produce the same login result; pick whichever you're more comfor
    | `hookii_agent` | Client fingerprint string sent on every REST request to Hookii. The default is a plausible Android/Xiaomi value. Override only if you want the add-on to identify as a different device — most users should leave this. |
    | `enable_discovery` | `true` (default) to auto-create the `lawn_mower` entity, 5 buttons and telemetry sensors via MQTT Discovery. Set `false` if you want to manage everything via your own YAML. |
    | `discovery_prefix` | `homeassistant` (default; matches the HA convention). Change only if you've reconfigured Home Assistant's MQTT integration to use a different prefix. |
+   | `hookii_env` | `beta` (default) or `prod`. `beta` connects to `iot.beta.hookii.com` (REST :10443, MQTT :8883), the reference backend with the full telemetry set on BETA firmware. `prod` connects to `iot.hookii.com` (same ports) for mowers on stable firmware / a production Hookii account. See "Beta vs Production cloud" below. |
+   | `hookii_rest_host` | Advanced; blank by default. Set to `host:port` to override the REST endpoint that `hookii_env` selects. Only needed if a port ever differs from the presets - leave blank otherwise. |
+   | `hookii_mqtt_host` | Advanced; blank by default. Set to `host:port` to override the cloud MQTT endpoint that `hookii_env` selects. Leave blank otherwise. |
 
 4. Save → switch to the **Info** tab → click **Start**.
 5. Open the **Log** tab and confirm you see lines like:
@@ -323,8 +342,9 @@ If you want more (chassis attitude, lift sensors, individual drive motor stats, 
 ## Troubleshooting
 
 - **My family / I keep getting logged out of the Hookii mobile app every few minutes.** This is the most-reported issue and it has ONE cause: the add-on is using the same Hookii account as the mobile app. Hookii's server permits exactly one active session per account; whichever client logged in most recently wins and the other is silently kicked. **Fix:** create a separate Hookii account for the bridge and share your mowers to it from your primary account (see the dedicated-account banner at the top of this page). Five minutes of setup, permanent fix.
-- **REST login fails with `code: 5, msg: 该用户未注册` ("user not registered").** Since v1.0.4 the add-on auto-lowercases your email before sending it to Hookii (their beta server is case-sensitive), so this should not happen from a case mismatch alone. If you still see it, double-check the email matches the one you log in to the official Hookii app with, and that the account is registered on the *beta* environment (not just on Hookii's stable cloud).
-- **REST login OK, MQTT connected, but no `RX hk/server/mower/push/...` lines ever appear.** The single most common cause: at least one of your mowers is still on stable firmware. The add-on connects to `iot.beta.hookii.com`, which is only populated by mowers on Hookii BETA firmware `1.6.8.4-beta` or newer. Open the Hookii app, confirm each mower's firmware has the `…-beta` suffix, and let pending updates install before retrying.
+- **REST login fails with `code: 5, msg: 该用户未注册` ("user not registered").** Since v1.0.4 the add-on auto-lowercases your email before sending it to Hookii (their beta server is case-sensitive), so this should not happen from a case mismatch alone. If you still see it, double-check the email matches the one you log in to the official Hookii app with, and that the account exists on the cloud you selected with `hookii_env` (a beta account is registered on `iot.beta.hookii.com`; a production account on `iot.hookii.com` - they are separate user directories).
+- **REST login OK, MQTT connected, but no `RX hk/server/mower/push/...` lines ever appear.** Most common cause on `hookii_env: beta`: at least one mower is still on stable firmware, so it isn't present on `iot.beta.hookii.com`. Either switch that mower to the Beta channel (confirm the `…-beta` suffix in the Hookii app), OR set `hookii_env: prod` to talk to the production cloud `iot.hookii.com` instead. Also double-check you're pointed at the cloud that actually hosts your account: a beta account won't appear on prod and vice versa.
+- **`hookii_env: prod` shows a sparser status with no granular sensors / no firmware-upgrade sensor.** This is **expected, not a bug.** Stable (production) firmware emits the "Shape A" STATUS (`workingMode` only, often no `robotStatus`), so the bridge can derive the core lawn_mower state, battery, the command buttons and Discovery - but not the granular per-system sensors or the firmware-upgrade indicator (those need BETA firmware `1.6.8.4-beta+` and `hookii_env: beta`). Everything else keeps working normally.
 - **No sensors update at all.** Double-check the bridge logs show `cloud-mqtt connected` AND a `RX hk/server/mower/push/...` line within ~30 s. If the second is missing, the heartbeat isn't being accepted — verify your account works in the official Hookii app first.
 - **REST login OK but `mowing_zero` / serial mismatch.** Open the bridge log, look for `learned model=… for serial=…`. If your serial never shows up there, you typed the wrong one in `mower_serials`. Check it against the Hookii app.
 - **Sensor values are stuck.** Try setting `log_level: DEBUG`, restart the add-on, watch the logs and reload your YAML.

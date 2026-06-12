@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.9 (2026-06-12)
+
+**Production-cloud support: the bridge can now run against Hookii's PRODUCTION cloud (`iot.hookii.com`), not just the beta backend.** Until now the bridge only ever connected to `iot.beta.hookii.com`, so mowers on stable firmware / a production Hookii account were out of luck. A new `hookii_env` option selects the backend:
+
+- `hookii_env: beta` (default) → `iot.beta.hookii.com` (REST :10443, MQTT :8883), the protocol's reference backend. BETA firmware `1.6.8.4-beta+` emits the full STATUS here: the fine-grained `robotStatus` state machine, the granular per-system sensors, and firmware-upgrade awareness.
+- `hookii_env: prod` → `iot.hookii.com` (same ports :10443 / :8883), the production cloud. Stable (production) firmware emits a sparser "Shape A" STATUS (`workingMode` only, often no `robotStatus`), so on prod you still get the core lawn_mower state (docked / mowing / returning, derived from `workingMode`), battery, the command buttons and Discovery - but NOT the granular sensors or the firmware-upgrade indicator. The bridge handles both shapes and degrades gracefully; nothing fails just because a mower is on stable firmware.
+
+Two new optional advanced options, `hookii_rest_host` and `hookii_mqtt_host` (each a `host:port`), override the endpoints `hookii_env` selects - blank by default, only needed if a port ever differs from the presets. For Container / k3s / docker users (no Supervisor) the same is controlled by `HOOKII_ENV=beta|prod` plus the optional `HOOKII_REST_HOST` / `HOOKII_MQTT_HOST` env vars. The doc banners that previously said stable-firmware mowers "will not work" have been rewritten to reflect both clouds and the telemetry tradeoff.
+
+## 1.2.8 (2026-06-11)
+
+**Firmware-version sensor, firmware-upgrading binary_sensor, and command lockout during an OTA flash.** Two new auto-discovered entities per mower:
+
+- `sensor.hookii_<SERIAL>_firmware_version` - the mower's reported firmware version.
+- `binary_sensor.hookii_<SERIAL>_firmware_upgrading` - on while a firmware OTA is in progress.
+
+During a firmware update (`robotStatus` 6) the bridge now **auto-disables all command buttons and the `lawn_mower` entity** (publishes availability offline) and drops any command it receives, so nothing can interfere with the flash. Availability is restored automatically when the OTA completes. These features need `robotStatus`, so they are **BETA-firmware only** (`hookii_env: beta`); on stable / production firmware the firmware-upgrade detection isn't available.
+
 ## 1.2.7 (2026-06-07)
 
 **The add-on now ships as a prebuilt multi-arch image from GitHub Container Registry - Home Assistant downloads it instead of building it on your device.** Until now this add-on had no `image:` key, so every install/update made your Home Assistant build the Docker image locally from the Dockerfile. On slow or ARM hardware (Raspberry Pi etc.), or during a transient hiccup pulling the base image, that local build could fail or time out - which showed up as "update does not download / not possible to update". A GitHub Action now builds `amd64` / `aarch64` / `armv7` images on every release and pushes them to `ghcr.io/torvalstrom/<arch>-hookii-bridge`, and the add-on's `config.yaml` points at that image. Updates are now a fast registry pull, identical on every architecture. No configuration change is needed; this is purely how the image is delivered. (Code is unchanged from 1.2.6.)

@@ -1,7 +1,7 @@
 # Neomow X Home Assistant Add-on
 
-> ⚠️ **Requires Hookii BETA firmware `1.6.8.4-beta` or newer on every mower this bridge talks to.**
-> The new cloud protocol this add-on speaks (`iot.beta.hookii.com`) is only live on the Hookii BETA channel. **Mowers on the stable firmware channel will not work.** Switch each mower to the Beta channel in the Hookii mobile app before installing.
+> ℹ️ **Works against BOTH the Hookii BETA cloud and the PRODUCTION cloud.**
+> Pick the backend with the `hookii_env` option (add-on) or the `HOOKII_ENV` env var (Container / k3s): `beta` → `iot.beta.hookii.com` (default), `prod` → `iot.hookii.com`. **BETA firmware `1.6.8.4-beta` or newer** unlocks the richest telemetry (granular sensors + firmware-upgrade awareness); mowers on **stable / production firmware** work for the core features (state, battery, command buttons, Discovery) with fewer sensors. The bridge handles both and degrades gracefully - it never fails just because a mower is on stable firmware. See [DOCS.md](hookii_bridge/DOCS.md) "Beta vs Production cloud" for the full tradeoff and how to choose.
 
 > 🚨 **Use a DEDICATED Hookii account for the bridge, not your primary account.**
 > Hookii's server only keeps ONE active session per account. If the bridge and your phone app share the same account they will silently evict each other's sessions every few minutes, and you will be permanently logged out of the mobile app.
@@ -169,7 +169,7 @@ One automation instance per mower - if you have three Neomows, create three auto
 
 ## How it works under the hood
 
-In May 2026 Hookii migrated their cloud from a passive-subscribe MQTT bus to a JWT-gated heartbeat protocol on `iot.beta.hookii.com`. The old "just subscribe to `hookii/details/device/<serial>`" trick stopped working overnight, and the official Hookii app became the only client that could see the new protocol.
+In May 2026 Hookii migrated their cloud from a passive-subscribe MQTT bus to a JWT-gated heartbeat protocol, first on the beta cloud `iot.beta.hookii.com` and now on the production cloud `iot.hookii.com` too. The old "just subscribe to `hookii/details/device/<serial>`" trick stopped working overnight, and the official Hookii app became the only client that could see the new protocol. The bridge speaks to whichever cloud you select with `hookii_env` / `HOOKII_ENV` (`beta` by default, `prod` for stable-firmware mowers on a production account).
 
 This add-on:
 
@@ -250,8 +250,13 @@ services:
       - HEARTBEAT_SEC=1.5                  # match the mobile app
       - ENABLE_DISCOVERY=1                 # auto-create HA entities
       - DISCOVERY_PREFIX=homeassistant
+      - HOOKII_ENV=beta                    # beta (iot.beta.hookii.com) or prod (iot.hookii.com)
+      # - HOOKII_REST_HOST=host:port       # optional: override the REST endpoint hookii_env selects
+      # - HOOKII_MQTT_HOST=host:port       # optional: override the cloud MQTT endpoint
       - LOG_LEVEL=INFO
 ```
+
+> ℹ️ **Beta vs production cloud.** `HOOKII_ENV=beta` (default) targets `iot.beta.hookii.com` and gives the full telemetry set on BETA firmware `1.6.8.4-beta+`; `HOOKII_ENV=prod` targets `iot.hookii.com` for mowers on stable firmware / a production account (core state, battery, command buttons and Discovery, just fewer sensors). `HOOKII_REST_HOST` / `HOOKII_MQTT_HOST` (each a `host:port`) override the endpoints `HOOKII_ENV` selects and are only needed if a port ever differs from the presets. See [DOCS.md](hookii_bridge/DOCS.md) "Beta vs Production cloud".
 
 > ℹ️ Note the `- KEY=VALUE` list form (not `KEY: "value"`). Both are valid compose syntax, but the list form is more robust against YAML parsers that mis-handle colon-containing string values like passwords or `HOOKII_ACCOUNTS` triplets.
 
@@ -311,6 +316,9 @@ In Home Assistant, the bridge's mower entities (`lawn_mower.*`, the 5 command bu
 | `HEARTBEAT_SEC` | no | `1.5` | Hookii cloud heartbeat interval. Match the mobile app's `1.5` or your phone will get logged out. |
 | `ENABLE_DISCOVERY` | no | `1` | Set `0` if you prefer to define sensors via the legacy YAML block instead. |
 | `DISCOVERY_PREFIX` | no | `homeassistant` | Override only if you customised this in HA's MQTT integration. |
+| `HOOKII_ENV` | no | `beta` | `beta` → `iot.beta.hookii.com` (full telemetry on BETA firmware `1.6.8.4-beta+`); `prod` → `iot.hookii.com` (core features for stable-firmware mowers / a production account). |
+| `HOOKII_REST_HOST` | no | — | `host:port` override for the REST endpoint that `HOOKII_ENV` selects. Only needed if a port ever differs from the presets. |
+| `HOOKII_MQTT_HOST` | no | — | `host:port` override for the cloud MQTT endpoint that `HOOKII_ENV` selects. |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG` for protocol-level traces. |
 
 ### 5. Updating later
