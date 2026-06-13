@@ -1,0 +1,662 @@
+{
+  "info": {
+    "name": "Hookii Neomow REST API Testing",
+    "description": "REST API collection for testing Hookii Neomow cloud REST endpoints (Production)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login (Production)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii ",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"your-email@example.com\",\n  \"password\": \"MD5_UPPERCASE_HASH_HERE_OR_CLEARTEXT\",\n  \"appVersion\": \"1.1.0\",\n  \"appName\": \"Hookii App\",\n  \"phoneModel\": \"Android\",\n  \"osVersion\": \"16\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/user/login/email",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "login",
+                "email"
+              ]
+            },
+            "description": "Login to Hookii Production cloud with your account credentials. Returns JWT token needed for subsequent requests. Save the JWT and use it in other requests."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mower Commands",
+      "item": [
+        {
+          "name": "Start Mowing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"command\": \"start\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/start/stop/job",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "start",
+                "stop",
+                "job"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Pause Mowing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"command\": \"pause\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/start/stop/job",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "start",
+                "stop",
+                "job"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Return to Dock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"command\": \"return\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/start/stop/job",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "start",
+                "stop",
+                "job"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Stop (Keep Progress)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"command\": \"stop\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/start/stop/job",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "start",
+                "stop",
+                "job"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedule Management",
+      "item": [
+        {
+          "name": "Write Schedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"schedule\": {\n    \"enabled\": true,\n    \"startTime\": \"09:00\",\n    \"endTime\": \"17:00\",\n    \"daysOfWeek\": [1, 2, 3, 4, 5],\n    \"timeZoneId\": \"Europe/Berlin\"\n  }\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/calendar/time",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "calendar",
+                "time"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Write Parameters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"parameters\": {\n    \"rainSensor\": true,\n    \"returnOnRain\": true,\n    \"cuttingHeight\": 30\n  }\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/cmd/calendar/param",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "cmd",
+                "calendar",
+                "param"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Camera & Recovery",
+      "item": [
+        {
+          "name": "Capture Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\"\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/capture/image",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "capture",
+                "image"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Recovery Alarm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "hookii-token",
+                "value": "Hookii {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "hookii-agent",
+                "value": "Android/Xiaomi 25010PN30G 16/V1.1.0/189",
+                "type": "text"
+              },
+              {
+                "key": "user-agent",
+                "value": "Dart/3.9 (dart:io)",
+                "type": "text"
+              },
+              {
+                "key": "accept-encoding",
+                "value": "gzip",
+                "type": "text"
+              },
+              {
+                "key": "app-time-zone-offset",
+                "value": "60",
+                "type": "text"
+              },
+              {
+                "key": "content-type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "app-language",
+                "value": "en",
+                "type": "text"
+              },
+              {
+                "key": "app-name",
+                "value": "Hookii App",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serialNumber\": \"HKX1EB100JD25010115\",\n  \"modelCode\": \"0002\",\n  \"actionCode\": 515\n}\n"
+            },
+            "url": {
+              "raw": "https://iot.hookii.com:10443/api/v1/mower/remote/recovery/alarm",
+              "protocol": "https",
+              "host": [
+                "iot",
+                "hookii",
+                "com"
+              ],
+              "port": "10443",
+              "path": [
+                "api",
+                "v1",
+                "mower",
+                "remote",
+                "recovery",
+                "alarm"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
