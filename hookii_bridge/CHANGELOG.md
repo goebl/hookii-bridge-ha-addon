@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0-beta5 (2026-06-14)
+
+**Fixes flickering telemetry sensors.** Hookii intermittently emits sparse STATUS packets - a field missing, or present but `null` - which blanked the affected HA sensors to "unknown" for a moment and then back, so e.g. the work-status sensor visibly flickered between its value and "unknown" every few seconds. The bridge now keeps a per-mower last-known STATUS, merges each inbound packet's **non-null** fields into it, and republishes the **complete merged STATUS**, so HA always sees every field at its last-known value. Retaining the last value is strictly better than flickering; a field only "disappears" if the cloud genuinely never sent it.
+
 ## 1.5.0-beta4 (2026-06-13)
 
 **Adds a dedicated `/embed` path for embedding the mower SVG in HA dashboards.** The existing `/svg/<label>` route works for the in-panel JS refresh wrapper but is unusable inside HA `picture` / `picture-entity` cards: the SVG is emitted with `width="100%" height="100%"`, which stretches correctly inside a sized parent but collapses to 0×0 inside an `<img src="…">` tag (HA cards render image URLs that way), and the `Cache-Control: no-store` header blocks the conditional 304 re-fetch HA uses when an entity state changes. The new endpoint fixes both:

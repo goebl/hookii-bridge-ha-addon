@@ -971,6 +971,13 @@ class AccountClient:
         # NOTICE_ALARM messages, self-cleared from STATUS (see _update_alarm).
         # Shape: {"active": bool, "errCode": int|None, "raised_at": float}.
         self._alarm: dict[str, dict] = {}
+        # Per-mower last-known-good STATUS, accumulated field-by-field. Hookii
+        # intermittently emits sparse STATUS packets (a field missing, or
+        # present-but-null), which made HA's sensors flicker to "unknown" every
+        # few seconds. We merge each inbound STATUS's NON-NULL fields into this
+        # cache and republish the COMPLETE merged STATUS, so HA always sees every
+        # field at its last-known value. Shape: {serial: {field: value, ...}}.
+        self._last_status: dict[str, dict] = {}
 
     # ---- MQTT lifecycle ------------------------------------------------
 
@@ -1068,8 +1075,21 @@ class AccountClient:
             # work for both shapes the new cloud emits (see normalise_status).
             if msg_type == "STATUS":
                 normalise_status(payload)
+                # Merge this packet's NON-NULL fields into the per-mower cache,
+                # then republish the COMPLETE merged STATUS. Hookii sometimes
+                # emits sparse packets (a field missing or present-but-null);
+                # without this merge those blanked HA sensors to "unknown" every
+                # few seconds (the visible flicker). Retaining the last-known
+                # value per field is strictly better than flickering.
+                st_in = payload.get("data", {}).get("STATUS", {})
+                cached = self._last_status.setdefault(serial, {})
+                if isinstance(st_in, dict):
+                    for _k, _v in st_in.items():
+                        if _v is not None:
+                            cached[_k] = _v
+                payload.setdefault("data", {})["STATUS"] = cached
                 payload_out = json.dumps(payload).encode("utf-8")
-                st = payload.get("data", {}).get("STATUS", {})
+                st = cached
                 # Firmware-upgrade gate: during OTA (robotStatus 6) publish an
                 # availability "offline" so HA marks the command buttons +
                 # lawn_mower unavailable, so a stray press can't interfere with
