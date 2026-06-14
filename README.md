@@ -35,7 +35,18 @@ The add-on auto-publishes Home Assistant MQTT-Discovery configs, so as soon as i
 - 14 sensors per mower: battery percentage, blade RPM, voltage, charge current, four temperatures (battery / blade motor / left drive / right drive), WiFi signal, GPS satellite count, latitude, longitude, work status code, and a friendly "State" sensor ("mowing" / "returning" / "docked") derived from the mower's state machine.
 - The full raw `hookii/details/device/<serial>` STATUS payload is also republished, so any existing template sensors, automations, n8n flows or dashboards you wrote against the old community workaround keep working.
 
-## The Mower Map — built in, nothing to install
+## The Mower Map
+
+> 🗺️ **Running Home Assistant in a container (Docker / Compose / Core)?** The
+> built-in map below is served over **HA Ingress**, which only exists on Home
+> Assistant **OS / Supervised**. For the **broadest support** — including
+> container installs — use the new **native Lovelace card + integration**:
+> **[`torvalstrom/hookii-neomow-ha`](https://github.com/torvalstrom/hookii-neomow-ha)**.
+> It renders the same map *natively in your dashboard* (no iframe, no external
+> service) from the entities this bridge already publishes, and installs via
+> HACS. The Ingress map below remains a zero-config convenience for HAOS users.
+
+### Built-in Ingress map (HAOS / Supervised convenience)
 
 **Since v1.5.0 the Mower Map is part of this add-on — there is no separate add-on to install.** It renders a live SVG view of each mower's yard: the boundary polygon (when the cloud has streamed it), every cut path the mower has driven (thick green), every transit path it took without cutting (thin light green), the live trail in your chosen colour, and the mower itself with a heading arrow. It updates every 10 seconds.
 
